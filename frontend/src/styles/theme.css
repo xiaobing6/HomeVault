@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   color: #29342f;
-  background: #f8f3ea;
+  background: #f3f6f2;
 }
 
 * {
@@ -10,11 +10,11 @@
 
 body {
   margin: 0;
-  min-width: 1080px;
+  min-width: 320px;
   min-height: 100vh;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(248, 243, 234, 0.95)),
-    #f8f3ea;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(237, 244, 239, 0.95)),
+    #f3f6f2;
 }
 
 .page-title {
