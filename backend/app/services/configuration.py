@@ -104,6 +104,14 @@ def ensure_core_configuration_seed(db: Session) -> CoreConfigurationSeedResult:
 
 
 def get_or_create_home_space(db: Session) -> HomeSpace:
+    home_space = db.scalar(
+        select(HomeSpace)
+        .where(HomeSpace.is_active.is_(True))
+        .order_by(HomeSpace.id)
+    )
+    if home_space is not None:
+        return home_space
+
     home_space = db.scalar(select(HomeSpace).where(HomeSpace.name == HOME_SPACE_NAME))
     if home_space is None:
         home_space = HomeSpace(
@@ -113,6 +121,8 @@ def get_or_create_home_space(db: Session) -> HomeSpace:
         )
         db.add(home_space)
         db.flush()
+    else:
+        home_space.is_active = True
     return home_space
 
 
@@ -217,28 +227,36 @@ def assert_category_parent_valid(
 
 
 def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
-    seed = ensure_core_configuration_seed(db)
-    residences = list_residences(db)
-    location_nodes = db.scalars(
-        select(LocationNode).order_by(LocationNode.sort_order, LocationNode.id)
-    ).all()
-    family_members = db.scalars(
-        select(FamilyMember).order_by(FamilyMember.id)
-    ).all()
-    categories = db.scalars(
-        select(Category).order_by(Category.sort_order, Category.name, Category.id)
-    ).all()
-    item_statuses = db.scalars(
-        select(ItemStatus).order_by(ItemStatus.sort_order, ItemStatus.id)
-    ).all()
-    dictionary_groups = db.scalars(
-        select(DictionaryGroup)
-        .options(selectinload(DictionaryGroup.options))
-        .order_by(DictionaryGroup.code)
-    ).all()
+    with db.no_autoflush:
+        home_space = db.scalar(
+            select(HomeSpace)
+            .where(HomeSpace.is_active.is_(True))
+            .order_by(HomeSpace.id)
+        )
+        if home_space is None:
+            raise bad_request("核心配置未初始化")
+
+        residences = list_residences(db)
+        location_nodes = db.scalars(
+            select(LocationNode).order_by(LocationNode.sort_order, LocationNode.id)
+        ).all()
+        family_members = db.scalars(
+            select(FamilyMember).order_by(FamilyMember.id)
+        ).all()
+        categories = db.scalars(
+            select(Category).order_by(Category.sort_order, Category.name, Category.id)
+        ).all()
+        item_statuses = db.scalars(
+            select(ItemStatus).order_by(ItemStatus.sort_order, ItemStatus.id)
+        ).all()
+        dictionary_groups = db.scalars(
+            select(DictionaryGroup)
+            .options(selectinload(DictionaryGroup.options))
+            .order_by(DictionaryGroup.code)
+        ).all()
 
     return ConfigBootstrapResponse(
-        home_space=HomeSpaceResponse.model_validate(seed.home_space),
+        home_space=HomeSpaceResponse.model_validate(home_space),
         residences=[ResidenceResponse.model_validate(residence) for residence in residences],
         location_tree=build_location_tree(list(location_nodes)),
         family_members=[FamilyMemberResponse.model_validate(member) for member in family_members],
@@ -253,6 +271,10 @@ def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
 
 def create_residence(db: Session, payload: ResidenceCreate) -> ResidenceResponse:
     home_space = get_or_create_home_space(db)
+    existing = db.scalar(select(Residence).where(Residence.name == payload.name))
+    if existing is not None:
+        raise bad_request("住宅名称已存在")
+
     residence = Residence(
         home_space_id=home_space.id,
         name=payload.name,
@@ -306,6 +328,10 @@ def create_family_member(db: Session, payload: FamilyMemberCreate) -> FamilyMemb
 
 
 def create_category(db: Session, payload: CategoryCreate) -> CategoryResponse:
+    existing = db.scalar(select(Category).where(Category.code == payload.code))
+    if existing is not None:
+        raise bad_request("分类编码已存在")
+
     assert_category_parent_valid(db, payload.parent_id)
     category = Category(
         parent_id=payload.parent_id,
@@ -328,6 +354,15 @@ def create_attribute_definition(
     category = db.get(Category, payload.category_id)
     if category is None:
         raise bad_request("分类不存在")
+
+    existing = db.scalar(
+        select(AttributeDefinition).where(
+            AttributeDefinition.category_id == payload.category_id,
+            AttributeDefinition.key == payload.key,
+        )
+    )
+    if existing is not None:
+        raise bad_request("字段标识已存在")
 
     definition = AttributeDefinition(
         category_id=payload.category_id,
