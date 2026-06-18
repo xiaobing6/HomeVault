@@ -49,7 +49,16 @@ class User(Base):
         back_populates="users",
         lazy="selectin",
     )
-    sessions: Mapped[list[AuthSession]] = relationship(back_populates="user", lazy="selectin")
+    sessions: Mapped[list[AuthSession]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    external_identities: Mapped[list[ExternalIdentity]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class Role(Base):
@@ -113,3 +122,5 @@ class ExternalIdentity(Base):
     provider: Mapped[str] = mapped_column(String(40), nullable=False)
     provider_subject: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="external_identities", lazy="selectin")
