@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import get_settings
 
@@ -22,10 +23,16 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
 
 
 def create_db_engine(database_url: str) -> Engine:
+    engine_options = {
+        "connect_args": _connect_args(database_url),
+        "future": True,
+    }
+    if database_url == "sqlite:///:memory:":
+        engine_options["poolclass"] = StaticPool
+
     db_engine = create_engine(
         database_url,
-        connect_args=_connect_args(database_url),
-        future=True,
+        **engine_options,
     )
     if database_url.startswith("sqlite"):
         event.listen(db_engine, "connect", _enable_sqlite_foreign_keys)
