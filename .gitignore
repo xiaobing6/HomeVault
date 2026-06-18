@@ -1,5 +1,45 @@
 .worktrees/
-pytest-basetemp/
-.pytest-basetemp/
+
+# Python
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and runtime files
+*.db
+*.sqlite
+*.sqlite3
+backend/uploads/
+uploads/
+logs/
+*.log
+
+# Test and browser artifacts
+pytest-basetemp/
+.pytest-basetemp/
+output/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+coverage/
+frontend/coverage/
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
