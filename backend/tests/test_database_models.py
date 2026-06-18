@@ -24,6 +24,19 @@ EXPECTED_AUTH_TABLES = {
     "external_identities",
 }
 
+EXPECTED_CONFIGURATION_TABLES = {
+    "home_spaces",
+    "residences",
+    "location_nodes",
+    "family_members",
+    "categories",
+    "attribute_definitions",
+    "attribute_options",
+    "item_statuses",
+    "dictionary_groups",
+    "dictionary_options",
+}
+
 
 def session_expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=1)
@@ -117,5 +130,34 @@ def test_alembic_upgrade_and_downgrade_round_trip_temp_sqlite(monkeypatch, tmp_p
         finally:
             downgraded_engine.dispose()
         assert EXPECTED_AUTH_TABLES.isdisjoint(downgraded_tables)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_configuration_migration_upgrade_and_downgrade_temp_sqlite(monkeypatch, tmp_path: Path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "homevault_configuration_migration_test.db"
+    database_url = f"sqlite:///{db_path.resolve().as_posix()}"
+    alembic_config = Config(str(backend_dir / "alembic.ini"))
+    alembic_config.set_main_option("script_location", str(backend_dir / "alembic"))
+    monkeypatch.setenv("HOMEVAULT_DATABASE_URL", database_url)
+    get_settings.cache_clear()
+
+    try:
+        command.upgrade(alembic_config, "20260619_0002")
+        upgraded_engine = create_engine(database_url)
+        try:
+            upgraded_tables = set(inspect(upgraded_engine).get_table_names())
+        finally:
+            upgraded_engine.dispose()
+        assert EXPECTED_CONFIGURATION_TABLES.issubset(upgraded_tables)
+
+        command.downgrade(alembic_config, "base")
+        downgraded_engine = create_engine(database_url)
+        try:
+            downgraded_tables = set(inspect(downgraded_engine).get_table_names())
+        finally:
+            downgraded_engine.dispose()
+        assert EXPECTED_CONFIGURATION_TABLES.isdisjoint(downgraded_tables)
     finally:
         get_settings.cache_clear()
