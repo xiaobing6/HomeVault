@@ -168,6 +168,17 @@ HOMEVAULT_ADMIN_USERNAME=admin
 HOMEVAULT_ADMIN_PASSWORD=ChangeMe123!
 ```
 
+- [ ] **Step 1.5: Install backend development dependencies**
+
+Run:
+
+```powershell
+Set-Location backend
+python -m pip install -e ".[dev]"
+```
+
+Expected: dependencies install successfully so test failures reflect missing application code rather than missing packages.
+
 - [ ] **Step 2: Write the failing health test**
 
 Create `backend/tests/test_health.py`:
