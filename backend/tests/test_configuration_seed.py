@@ -4,6 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.configuration import (
+    AttributeDefinition,
+    Category,
     DictionaryGroup,
     HomeSpace,
     ItemStatus,
@@ -87,6 +89,17 @@ def test_create_residence_rejects_duplicate_name(db_session: Session) -> None:
     assert_bad_request_message(exc_info, "住宅名称已存在")
 
 
+def test_create_residence_rolls_back_commit_time_duplicate_name(db_session: Session) -> None:
+    seed = ensure_core_configuration_seed(db_session)
+    db_session.add(Residence(home_space_id=seed.home_space.id, name="主住宅"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_residence(db_session, ResidenceCreate(name="主住宅"))
+
+    assert_bad_request_message(exc_info, "住宅名称已存在")
+    assert db_session.scalar(select(HomeSpace).where(HomeSpace.id == seed.home_space.id)) is not None
+
+
 def test_create_category_rejects_duplicate_code(db_session: Session) -> None:
     payload = CategoryCreate(code="documents", name="证件")
     create_category(db_session, payload)
@@ -95,6 +108,16 @@ def test_create_category_rejects_duplicate_code(db_session: Session) -> None:
         create_category(db_session, CategoryCreate(code="documents", name="其他证件"))
 
     assert_bad_request_message(exc_info, "分类编码已存在")
+
+
+def test_create_category_rolls_back_commit_time_duplicate_code(db_session: Session) -> None:
+    db_session.add(Category(code="documents", name="证件"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_category(db_session, CategoryCreate(code="documents", name="其他证件"))
+
+    assert_bad_request_message(exc_info, "分类编码已存在")
+    assert db_session.scalars(select(Category)).all() == []
 
 
 def test_create_attribute_definition_rejects_duplicate_key_in_category(db_session: Session) -> None:
@@ -119,6 +142,33 @@ def test_create_attribute_definition_rejects_duplicate_key_in_category(db_sessio
         )
 
     assert_bad_request_message(exc_info, "字段标识已存在")
+
+
+def test_create_attribute_definition_rolls_back_commit_time_duplicate_key(db_session: Session) -> None:
+    category = create_category(db_session, CategoryCreate(code="documents", name="证件"))
+    db_session.add(
+        AttributeDefinition(
+            category_id=category.id,
+            key="expire_date",
+            name="有效期",
+            field_type="date",
+            is_active=True,
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_attribute_definition(
+            db_session,
+            AttributeDefinitionCreate(
+                category_id=category.id,
+                key="expire_date",
+                name="到期日",
+                field_type="date",
+            ),
+        )
+
+    assert_bad_request_message(exc_info, "字段标识已存在")
+    assert db_session.scalar(select(Category).where(Category.id == category.id)) is not None
 
 
 def test_location_parent_validation_rejects_missing_different_residence_and_self(db_session: Session) -> None:
@@ -146,6 +196,23 @@ def test_location_parent_validation_rejects_missing_different_residence_and_self
     with pytest.raises(HTTPException) as self_exc:
         assert_location_parent_valid(db_session, first_residence.id, first_node.id, current_id=first_node.id)
     assert_bad_request_message(self_exc, "位置上级节点不合法")
+
+
+def test_location_parent_validation_rejects_descendant_cycle(db_session: Session) -> None:
+    residence = create_residence(db_session, ResidenceCreate(name="住宅一"))
+    parent = create_location_node(
+        db_session,
+        LocationNodeCreate(residence_id=residence.id, name="客厅"),
+    )
+    child = create_location_node(
+        db_session,
+        LocationNodeCreate(residence_id=residence.id, parent_id=parent.id, name="电视柜"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        assert_location_parent_valid(db_session, residence.id, child.id, current_id=parent.id)
+
+    assert_bad_request_message(exc_info, "位置上级节点不合法")
 
 
 def test_category_parent_validation_rejects_cycle(db_session: Session) -> None:

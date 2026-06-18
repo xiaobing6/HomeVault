@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import bad_request
@@ -50,6 +51,14 @@ CORE_DICTIONARY_GROUPS = [
     ("importance", "重要程度"),
     ("storage_conditions", "存放条件"),
 ]
+
+
+def commit_or_bad_request(db: Session, message: str) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise bad_request(message) from exc
 
 
 @dataclass(frozen=True)
@@ -197,6 +206,21 @@ def assert_location_parent_valid(
     if parent is None or parent.residence_id != residence_id:
         raise bad_request("位置上级节点不合法")
 
+    visited: set[int] = set()
+    next_parent: LocationNode | None = parent
+    while next_parent is not None:
+        if current_id is not None and next_parent.id == current_id:
+            raise bad_request("位置上级节点不合法")
+        if next_parent.id in visited:
+            raise bad_request("位置上级节点不合法")
+        visited.add(next_parent.id)
+
+        if next_parent.parent_id is None:
+            return
+        next_parent = db.get(LocationNode, next_parent.parent_id)
+        if next_parent is None or next_parent.residence_id != residence_id:
+            raise bad_request("位置上级节点不合法")
+
 
 def assert_category_parent_valid(
     db: Session,
@@ -284,7 +308,7 @@ def create_residence(db: Session, payload: ResidenceCreate) -> ResidenceResponse
         is_active=True,
     )
     db.add(residence)
-    db.commit()
+    commit_or_bad_request(db, "住宅名称已存在")
     db.refresh(residence)
     return ResidenceResponse.model_validate(residence)
 
@@ -342,7 +366,7 @@ def create_category(db: Session, payload: CategoryCreate) -> CategoryResponse:
         is_active=True,
     )
     db.add(category)
-    db.commit()
+    commit_or_bad_request(db, "分类编码已存在")
     db.refresh(category)
     return CategoryResponse.model_validate(category)
 
@@ -377,6 +401,6 @@ def create_attribute_definition(
         is_active=True,
     )
     db.add(definition)
-    db.commit()
+    commit_or_bad_request(db, "字段标识已存在")
     db.refresh(definition)
     return AttributeDefinitionResponse.model_validate(definition)
