@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.errors import bad_request
 from app.models.configuration import (
     AttributeDefinition,
+    AttributeOption,
     Category,
     DictionaryGroup,
+    DictionaryOption,
     FamilyMember,
     HomeSpace,
     ItemStatus,
@@ -20,18 +22,32 @@ from app.models.configuration import (
 from app.schemas.configuration import (
     AttributeDefinitionCreate,
     AttributeDefinitionResponse,
+    AttributeDefinitionUpdate,
+    AttributeOptionCreate,
+    AttributeOptionResponse,
+    AttributeOptionUpdate,
     CategoryCreate,
     CategoryResponse,
+    CategoryUpdate,
     ConfigBootstrapResponse,
+    DictionaryGroupCreate,
     DictionaryGroupResponse,
+    DictionaryOptionCreate,
+    DictionaryOptionResponse,
     FamilyMemberCreate,
     FamilyMemberResponse,
+    FamilyMemberUpdate,
     HomeSpaceResponse,
+    HomeSpaceUpdate,
+    ItemStatusCreate,
     ItemStatusResponse,
+    ItemStatusUpdate,
     LocationNodeCreate,
     LocationNodeResponse,
+    LocationNodeUpdate,
     ResidenceCreate,
     ResidenceResponse,
+    ResidenceUpdate,
 )
 
 HOME_SPACE_NAME = "我们家"
@@ -161,7 +177,9 @@ def list_family_members(db: Session) -> list[FamilyMemberResponse]:
 
 def list_category_tree(db: Session) -> list[CategoryResponse]:
     categories = db.scalars(
-        select(Category).order_by(Category.sort_order, Category.name, Category.id)
+        select(Category)
+        .options(selectinload(Category.attribute_definitions).selectinload(AttributeDefinition.options))
+        .order_by(Category.sort_order, Category.name, Category.id)
     ).all()
     return build_category_tree(list(categories))
 
@@ -222,6 +240,13 @@ def build_category_tree(categories: list[Category]) -> list[CategoryResponse]:
             icon=category.icon,
             sort_order=category.sort_order,
             is_active=category.is_active,
+            attribute_definitions=[
+                AttributeDefinitionResponse.model_validate(definition)
+                for definition in sorted(
+                    category.attribute_definitions,
+                    key=lambda item: (item.sort_order, item.id),
+                )
+            ],
             children=[build(child) for child in children_by_parent.get(category.id, [])],
         )
 
@@ -305,7 +330,9 @@ def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
             select(FamilyMember).order_by(FamilyMember.id)
         ).all()
         categories = db.scalars(
-            select(Category).order_by(Category.sort_order, Category.name, Category.id)
+            select(Category)
+            .options(selectinload(Category.attribute_definitions).selectinload(AttributeDefinition.options))
+            .order_by(Category.sort_order, Category.name, Category.id)
         ).all()
         item_statuses = db.scalars(
             select(ItemStatus).order_by(ItemStatus.sort_order, ItemStatus.id)
@@ -441,3 +468,246 @@ def create_attribute_definition(
     commit_or_bad_request(db, "字段标识已存在")
     db.refresh(definition)
     return AttributeDefinitionResponse.model_validate(definition)
+
+
+def update_home_space(db: Session, payload: HomeSpaceUpdate) -> HomeSpaceResponse:
+    home_space = get_or_create_home_space(db)
+    home_space.name = payload.name
+    home_space.description = payload.description
+    home_space.is_active = True
+    commit_or_bad_request(db, "Home space name already exists")
+    db.refresh(home_space)
+    return HomeSpaceResponse.model_validate(home_space)
+
+
+def update_residence(db: Session, residence_id: int, payload: ResidenceUpdate) -> ResidenceResponse:
+    residence = db.get(Residence, residence_id)
+    if residence is None:
+        raise bad_request("Residence not found")
+
+    existing = db.scalar(
+        select(Residence).where(
+            Residence.name == payload.name,
+            Residence.id != residence_id,
+        )
+    )
+    if existing is not None:
+        raise bad_request("Residence name already exists")
+
+    residence.name = payload.name
+    residence.description = payload.description
+    residence.address = payload.address
+    residence.sort_order = payload.sort_order
+    residence.is_active = payload.is_active
+    commit_or_bad_request(db, "Residence name already exists")
+    db.refresh(residence)
+    return ResidenceResponse.model_validate(residence)
+
+
+def update_location_node(
+    db: Session,
+    node_id: int,
+    payload: LocationNodeUpdate,
+) -> LocationNodeResponse:
+    node = db.get(LocationNode, node_id)
+    if node is None:
+        raise bad_request("Location node not found")
+
+    assert_location_parent_valid(db, node.residence_id, payload.parent_id, current_id=node_id)
+    node.parent_id = payload.parent_id
+    node.name = payload.name
+    node.node_type = payload.node_type
+    node.icon = payload.icon
+    node.sort_order = payload.sort_order
+    node.note = payload.note
+    node.is_active = payload.is_active
+    db.commit()
+    db.refresh(node)
+    return LocationNodeResponse.model_validate(node)
+
+
+def update_family_member(
+    db: Session,
+    member_id: int,
+    payload: FamilyMemberUpdate,
+) -> FamilyMemberResponse:
+    member = db.get(FamilyMember, member_id)
+    if member is None:
+        raise bad_request("Family member not found")
+
+    member.name = payload.name
+    member.relation = payload.relation
+    member.phone = payload.phone
+    member.note = payload.note
+    member.is_active = payload.is_active
+    db.commit()
+    db.refresh(member)
+    return FamilyMemberResponse.model_validate(member)
+
+
+def update_category(db: Session, category_id: int, payload: CategoryUpdate) -> CategoryResponse:
+    category = db.get(Category, category_id)
+    if category is None:
+        raise bad_request("Category not found")
+
+    assert_category_parent_valid(db, payload.parent_id, current_id=category_id)
+    category.parent_id = payload.parent_id
+    category.name = payload.name
+    category.icon = payload.icon
+    category.sort_order = payload.sort_order
+    category.is_active = payload.is_active
+    db.commit()
+    db.refresh(category)
+    return CategoryResponse.model_validate(category)
+
+
+def update_attribute_definition(
+    db: Session,
+    definition_id: int,
+    payload: AttributeDefinitionUpdate,
+) -> AttributeDefinitionResponse:
+    definition = db.get(AttributeDefinition, definition_id)
+    if definition is None:
+        raise bad_request("Attribute definition not found")
+
+    definition.name = payload.name
+    definition.field_type = payload.field_type
+    definition.default_value = payload.default_value
+    definition.privacy_level = payload.privacy_level
+    definition.is_required = payload.is_required
+    definition.is_filterable = payload.is_filterable
+    definition.sort_order = payload.sort_order
+    definition.is_active = payload.is_active
+    db.commit()
+    db.refresh(definition)
+    return AttributeDefinitionResponse.model_validate(definition)
+
+
+def create_attribute_option(
+    db: Session,
+    payload: AttributeOptionCreate,
+) -> AttributeOptionResponse:
+    definition = db.get(AttributeDefinition, payload.definition_id)
+    if definition is None:
+        raise bad_request("Attribute definition not found")
+
+    existing = db.scalar(
+        select(AttributeOption).where(
+            AttributeOption.definition_id == payload.definition_id,
+            AttributeOption.value == payload.value,
+        )
+    )
+    if existing is not None:
+        raise bad_request("Attribute option value already exists")
+
+    option = AttributeOption(
+        definition_id=payload.definition_id,
+        label=payload.label,
+        value=payload.value,
+        sort_order=payload.sort_order,
+        is_active=True,
+    )
+    db.add(option)
+    commit_or_bad_request(db, "Attribute option value already exists")
+    db.refresh(option)
+    return AttributeOptionResponse.model_validate(option)
+
+
+def update_attribute_option(
+    db: Session,
+    option_id: int,
+    payload: AttributeOptionUpdate,
+) -> AttributeOptionResponse:
+    option = db.get(AttributeOption, option_id)
+    if option is None:
+        raise bad_request("Attribute option not found")
+
+    option.label = payload.label
+    option.sort_order = payload.sort_order
+    option.is_active = payload.is_active
+    db.commit()
+    db.refresh(option)
+    return AttributeOptionResponse.model_validate(option)
+
+
+def create_item_status(db: Session, payload: ItemStatusCreate) -> ItemStatusResponse:
+    existing = db.scalar(select(ItemStatus).where(ItemStatus.code == payload.code))
+    if existing is not None:
+        raise bad_request("Item status code already exists")
+
+    item_status = ItemStatus(
+        code=payload.code,
+        name=payload.name,
+        semantic=payload.semantic,
+        sort_order=payload.sort_order,
+        is_system=False,
+        is_active=True,
+    )
+    db.add(item_status)
+    commit_or_bad_request(db, "Item status code already exists")
+    db.refresh(item_status)
+    return ItemStatusResponse.model_validate(item_status)
+
+
+def update_item_status(db: Session, status_id: int, payload: ItemStatusUpdate) -> ItemStatusResponse:
+    item_status = db.get(ItemStatus, status_id)
+    if item_status is None:
+        raise bad_request("Item status not found")
+
+    item_status.name = payload.name
+    item_status.semantic = payload.semantic
+    item_status.sort_order = payload.sort_order
+    item_status.is_active = payload.is_active
+    db.commit()
+    db.refresh(item_status)
+    return ItemStatusResponse.model_validate(item_status)
+
+
+def create_dictionary_group(
+    db: Session,
+    payload: DictionaryGroupCreate,
+) -> DictionaryGroupResponse:
+    existing = db.scalar(select(DictionaryGroup).where(DictionaryGroup.code == payload.code))
+    if existing is not None:
+        raise bad_request("Dictionary group code already exists")
+
+    group = DictionaryGroup(
+        code=payload.code,
+        name=payload.name,
+        is_system=False,
+        is_active=True,
+    )
+    db.add(group)
+    commit_or_bad_request(db, "Dictionary group code already exists")
+    db.refresh(group)
+    return DictionaryGroupResponse.model_validate(group)
+
+
+def create_dictionary_option(
+    db: Session,
+    payload: DictionaryOptionCreate,
+) -> DictionaryOptionResponse:
+    group = db.get(DictionaryGroup, payload.group_id)
+    if group is None:
+        raise bad_request("Dictionary group not found")
+
+    existing = db.scalar(
+        select(DictionaryOption).where(
+            DictionaryOption.group_id == payload.group_id,
+            DictionaryOption.value == payload.value,
+        )
+    )
+    if existing is not None:
+        raise bad_request("Dictionary option value already exists")
+
+    option = DictionaryOption(
+        group_id=payload.group_id,
+        label=payload.label,
+        value=payload.value,
+        sort_order=payload.sort_order,
+        is_active=True,
+    )
+    db.add(option)
+    commit_or_bad_request(db, "Dictionary option value already exists")
+    db.refresh(option)
+    return DictionaryOptionResponse.model_validate(option)

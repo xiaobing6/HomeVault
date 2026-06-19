@@ -47,6 +47,7 @@ export interface Category {
   icon: string
   sort_order: number
   is_active: boolean
+  attribute_definitions: AttributeDefinition[]
   children: Category[]
 }
 

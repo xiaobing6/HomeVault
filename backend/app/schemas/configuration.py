@@ -107,6 +107,7 @@ class CategoryResponse(CategoryUpdate):
 
     id: int
     code: str
+    attribute_definitions: list[AttributeDefinitionResponse] = Field(default_factory=list)
     children: list[CategoryResponse] = Field(default_factory=list)
 
 

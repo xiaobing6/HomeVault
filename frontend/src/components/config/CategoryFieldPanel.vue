@@ -55,12 +55,26 @@ const fieldTypes = [
 
 const categories = computed(() => data.value?.categories ?? [])
 const categoryOptions = computed<CategoryOption[]>(() => flattenCategories(categories.value))
+const selectedCategory = computed(() =>
+  fieldForm.category_id ? findCategory(categories.value, fieldForm.category_id) : null
+)
+const selectedCategoryFields = computed(() => selectedCategory.value?.attribute_definitions ?? [])
+const fieldEmptyText = computed(() => (selectedCategory.value ? '暂无字段' : '请选择分类'))
 
 function flattenCategories(nodes: Category[], depth = 0): CategoryOption[] {
   return nodes.flatMap((node) => [
     { id: node.id, label: `${'　'.repeat(depth)}${node.name}` },
     ...flattenCategories(node.children ?? [], depth + 1)
   ])
+}
+
+function findCategory(nodes: Category[], categoryId: number): Category | null {
+  for (const node of nodes) {
+    if (node.id === categoryId) return node
+    const child = findCategory(node.children ?? [], categoryId)
+    if (child) return child
+  }
+  return null
 }
 
 async function validateForm(form?: FormInstance) {
@@ -226,6 +240,32 @@ async function saveField() {
           保存字段
         </el-button>
       </el-form>
+
+      <h3 class="subsection-title">已有字段</h3>
+      <el-table
+        :data="selectedCategoryFields"
+        size="small"
+        class="data-table"
+        :empty-text="fieldEmptyText"
+      >
+        <el-table-column prop="name" label="字段" min-width="120" />
+        <el-table-column prop="key" label="键" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="field_type" label="类型" min-width="120" />
+        <el-table-column prop="is_required" label="必填" width="74">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.is_required ? 'warning' : 'info'">
+              {{ row.is_required ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="is_filterable" label="筛选" width="74">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.is_filterable ? 'success' : 'info'">
+              {{ row.is_filterable ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
     </section>
   </div>
 </template>
@@ -276,6 +316,13 @@ async function saveField() {
 
 .data-table {
   margin-top: 14px;
+}
+
+.subsection-title {
+  margin: 18px 0 10px;
+  color: #26342e;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 @media (max-width: 960px) {

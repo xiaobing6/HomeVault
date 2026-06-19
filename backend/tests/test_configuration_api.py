@@ -8,6 +8,7 @@ from app.api.deps import get_db
 from app.core.security import hash_password
 from app.main import app
 from app.models.auth import Role, User
+from app.models.configuration import AttributeOption
 from app.services.seed import seed_auth_baseline
 
 
@@ -94,6 +95,263 @@ def test_admin_creates_residence_location_member_category_and_field(client: Test
     assert bootstrap["location_tree"][0]["name"] == "客厅"
     assert bootstrap["family_members"][0]["name"] == "妈妈"
     assert bootstrap["categories"][0]["code"] == "documents"
+
+
+def test_created_attribute_definition_is_returned_in_category_read_payloads(client: TestClient) -> None:
+    headers = login(client)
+
+    category = client.post(
+        "/api/config/categories",
+        headers=headers,
+        json={"code": "documents", "name": "Documents", "icon": "document", "sort_order": 10},
+    )
+    assert category.status_code == 201
+    category_id = category.json()["id"]
+
+    field = client.post(
+        "/api/config/attribute-definitions",
+        headers=headers,
+        json={
+            "category_id": category_id,
+            "key": "expire_date",
+            "name": "Expire date",
+            "field_type": "date",
+            "is_filterable": True,
+            "sort_order": 10,
+        },
+    )
+    assert field.status_code == 201
+
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    categories = client.get("/api/config/categories", headers=headers)
+
+    assert bootstrap.status_code == 200
+    assert categories.status_code == 200
+    for category_payload in (bootstrap.json()["categories"][0], categories.json()[0]):
+        assert category_payload["code"] == "documents"
+        assert category_payload["attribute_definitions"] == [
+            {
+                "id": field.json()["id"],
+                "category_id": category_id,
+                "key": "expire_date",
+                "name": "Expire date",
+                "field_type": "date",
+                "default_value": "",
+                "privacy_level": "normal",
+                "is_required": False,
+                "is_filterable": True,
+                "sort_order": 10,
+                "is_active": True,
+                "options": [],
+            }
+        ]
+
+
+def test_attribute_options_are_returned_with_category_attribute_definitions(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    category = client.post(
+        "/api/config/categories",
+        headers=headers,
+        json={"code": "documents", "name": "Documents"},
+    ).json()
+    field = client.post(
+        "/api/config/attribute-definitions",
+        headers=headers,
+        json={
+            "category_id": category["id"],
+            "key": "retention",
+            "name": "Retention",
+            "field_type": "single_select",
+        },
+    ).json()
+    db_session.add(
+        AttributeOption(
+            definition_id=field["id"],
+            label="Long term",
+            value="long_term",
+            sort_order=10,
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/config/categories", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()[0]["attribute_definitions"][0]["options"] == [
+        {
+            "id": 1,
+            "definition_id": field["id"],
+            "label": "Long term",
+            "value": "long_term",
+            "sort_order": 10,
+            "is_active": True,
+        }
+    ]
+
+
+def test_dictionaries_alias_returns_seeded_groups(client: TestClient) -> None:
+    response = client.get("/api/config/dictionaries", headers=login(client))
+
+    assert response.status_code == 200
+    assert {"units", "importance", "storage_conditions"}.issubset(
+        {group["code"] for group in response.json()}
+    )
+
+
+def test_admin_can_use_backend_configuration_write_contract_routes(client: TestClient) -> None:
+    headers = login(client)
+
+    home_space = client.put(
+        "/api/config/home-space",
+        headers=headers,
+        json={"name": "Primary home", "description": "Configuration owner"},
+    )
+    assert home_space.status_code == 200
+    assert home_space.json()["name"] == "Primary home"
+
+    residence = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Residence one", "description": "", "address": "", "sort_order": 10},
+    )
+    assert residence.status_code == 201
+    residence_id = residence.json()["id"]
+    residence_update = client.patch(
+        f"/api/config/residences/{residence_id}",
+        headers=headers,
+        json={
+            "name": "Residence main",
+            "description": "Updated",
+            "address": "Updated address",
+            "sort_order": 20,
+            "is_active": True,
+        },
+    )
+    assert residence_update.status_code == 200
+    assert residence_update.json()["name"] == "Residence main"
+
+    location = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence_id, "name": "Room one", "node_type": "room"},
+    )
+    assert location.status_code == 201
+    location_id = location.json()["id"]
+    location_update = client.patch(
+        f"/api/config/location-nodes/{location_id}",
+        headers=headers,
+        json={
+            "parent_id": None,
+            "name": "Room main",
+            "node_type": "room",
+            "icon": "room",
+            "sort_order": 30,
+            "note": "Updated",
+            "is_active": True,
+        },
+    )
+    assert location_update.status_code == 200
+    assert location_update.json()["name"] == "Room main"
+
+    member = client.post(
+        "/api/config/family-members",
+        headers=headers,
+        json={"name": "Alex", "relation": "Owner", "phone": "", "note": ""},
+    )
+    assert member.status_code == 201
+    member_id = member.json()["id"]
+    member_update = client.patch(
+        f"/api/config/family-members/{member_id}",
+        headers=headers,
+        json={"name": "Alex Chen", "relation": "Owner", "phone": "123", "note": "Updated", "is_active": True},
+    )
+    assert member_update.status_code == 200
+    assert member_update.json()["phone"] == "123"
+
+    category = client.post(
+        "/api/config/categories",
+        headers=headers,
+        json={"code": "documents", "name": "Documents"},
+    )
+    assert category.status_code == 201
+    category_id = category.json()["id"]
+    category_update = client.patch(
+        f"/api/config/categories/{category_id}",
+        headers=headers,
+        json={"parent_id": None, "name": "Important documents", "icon": "document", "sort_order": 40, "is_active": True},
+    )
+    assert category_update.status_code == 200
+    assert category_update.json()["name"] == "Important documents"
+
+    field = client.post(
+        "/api/config/attribute-definitions",
+        headers=headers,
+        json={"category_id": category_id, "key": "expire_date", "name": "Expire date", "field_type": "date"},
+    )
+    assert field.status_code == 201
+    field_id = field.json()["id"]
+    field_update = client.patch(
+        f"/api/config/attribute-definitions/{field_id}",
+        headers=headers,
+        json={
+            "name": "Expiration date",
+            "field_type": "date",
+            "default_value": "",
+            "privacy_level": "normal",
+            "is_required": True,
+            "is_filterable": True,
+            "sort_order": 50,
+            "is_active": True,
+        },
+    )
+    assert field_update.status_code == 200
+    assert field_update.json()["is_required"] is True
+
+    attribute_option = client.post(
+        "/api/config/attribute-options",
+        headers=headers,
+        json={"definition_id": field_id, "label": "Long term", "value": "long_term", "sort_order": 10},
+    )
+    assert attribute_option.status_code == 201
+    attribute_option_update = client.patch(
+        f"/api/config/attribute-options/{attribute_option.json()['id']}",
+        headers=headers,
+        json={"label": "Permanent", "sort_order": 20, "is_active": True},
+    )
+    assert attribute_option_update.status_code == 200
+    assert attribute_option_update.json()["label"] == "Permanent"
+
+    status_response = client.post(
+        "/api/config/item-statuses",
+        headers=headers,
+        json={"code": "reserved", "name": "Reserved", "semantic": "available", "sort_order": 80},
+    )
+    assert status_response.status_code == 201
+    status_update = client.patch(
+        f"/api/config/item-statuses/{status_response.json()['id']}",
+        headers=headers,
+        json={"name": "Reserved now", "semantic": "available", "sort_order": 90, "is_active": True},
+    )
+    assert status_update.status_code == 200
+    assert status_update.json()["name"] == "Reserved now"
+
+    dictionary_group = client.post(
+        "/api/config/dictionary-groups",
+        headers=headers,
+        json={"code": "colors", "name": "Colors"},
+    )
+    assert dictionary_group.status_code == 201
+    dictionary_option = client.post(
+        "/api/config/dictionary-options",
+        headers=headers,
+        json={"group_id": dictionary_group.json()["id"], "label": "Red", "value": "red", "sort_order": 10},
+    )
+    assert dictionary_option.status_code == 201
+    assert dictionary_option.json()["value"] == "red"
 
 
 def test_viewer_cannot_create_configuration(client: TestClient, db_session: Session) -> None:
