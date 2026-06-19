@@ -45,8 +45,8 @@ async function handleLogout() {
             <span>物品</span>
           </el-menu-item>
         </PermissionGate>
-        <PermissionGate permission="users:manage">
-          <el-menu-item index="/admin">
+        <PermissionGate permission="config:manage">
+          <el-menu-item index="/admin/config">
             <el-icon><Setting /></el-icon>
             <span>后台管理</span>
           </el-menu-item>

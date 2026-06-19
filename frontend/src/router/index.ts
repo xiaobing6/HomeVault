@@ -11,10 +11,10 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: '', name: 'dashboard', component: () => import('../pages/DashboardPage.vue') },
       {
-        path: 'admin',
-        name: 'admin-placeholder',
-        component: () => import('../pages/ForbiddenPage.vue'),
-        meta: { permission: 'users:manage' }
+        path: 'admin/config',
+        name: 'core-config',
+        component: () => import('../pages/CoreConfigPage.vue'),
+        meta: { permission: 'config:manage' }
       }
     ]
   },
