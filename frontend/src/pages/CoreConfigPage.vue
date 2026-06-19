@@ -8,12 +8,17 @@ import CategoryFieldPanel from '../components/config/CategoryFieldPanel.vue'
 import DictionaryPanel from '../components/config/DictionaryPanel.vue'
 import FamilyMemberPanel from '../components/config/FamilyMemberPanel.vue'
 import ResidenceLocationPanel from '../components/config/ResidenceLocationPanel.vue'
+import { useAuthStore } from '../stores/auth'
 import { useConfigurationStore } from '../stores/configuration'
 
+const auth = useAuthStore()
 const configuration = useConfigurationStore()
 const { loading } = storeToRefs(configuration)
+const canReadConfig = auth.hasPermission('items:view')
 
 onMounted(async () => {
+  if (!canReadConfig) return
+
   try {
     await configuration.load()
   } catch (error) {
@@ -26,7 +31,15 @@ onMounted(async () => {
   <section class="core-config-page" v-loading="loading">
     <h1 class="page-title">核心配置</h1>
 
-    <el-tabs class="config-tabs">
+    <el-alert
+      v-if="!canReadConfig"
+      title="缺少物品查看权限，无法读取核心配置。"
+      type="error"
+      show-icon
+      :closable="false"
+    />
+
+    <el-tabs v-else class="config-tabs">
       <el-tab-pane label="住宅与位置">
         <ResidenceLocationPanel />
       </el-tab-pane>

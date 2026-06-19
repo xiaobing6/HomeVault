@@ -89,9 +89,25 @@ function toTreeNodes(nodes: LocationNode[]): TreeNode[] {
   }))
 }
 
+async function validateForm(form?: FormInstance) {
+  if (!form) return false
+  return form.validate().then(() => true).catch(() => false)
+}
+
+function trimResidenceForm() {
+  residenceForm.name = residenceForm.name.trim()
+  residenceForm.description = residenceForm.description.trim()
+  residenceForm.address = residenceForm.address.trim()
+}
+
+function trimLocationForm() {
+  locationForm.name = locationForm.name.trim()
+}
+
 async function saveResidence() {
-  if (!residenceFormRef.value) return
-  await residenceFormRef.value.validate()
+  trimResidenceForm()
+  const valid = await validateForm(residenceFormRef.value)
+  if (!valid) return
 
   residenceSaving.value = true
   try {
@@ -110,8 +126,9 @@ async function saveResidence() {
 }
 
 async function saveLocation() {
-  if (!locationFormRef.value) return
-  await locationFormRef.value.validate()
+  trimLocationForm()
+  const valid = await validateForm(locationFormRef.value)
+  if (!valid) return
   if (!locationForm.residence_id) return
 
   locationSaving.value = true

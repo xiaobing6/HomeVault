@@ -63,9 +63,26 @@ function flattenCategories(nodes: Category[], depth = 0): CategoryOption[] {
   ])
 }
 
+async function validateForm(form?: FormInstance) {
+  if (!form) return false
+  return form.validate().then(() => true).catch(() => false)
+}
+
+function trimCategoryForm() {
+  categoryForm.code = categoryForm.code.trim()
+  categoryForm.name = categoryForm.name.trim()
+  categoryForm.icon = categoryForm.icon.trim()
+}
+
+function trimFieldForm() {
+  fieldForm.key = fieldForm.key.trim()
+  fieldForm.name = fieldForm.name.trim()
+}
+
 async function saveCategory() {
-  if (!categoryFormRef.value) return
-  await categoryFormRef.value.validate()
+  trimCategoryForm()
+  const valid = await validateForm(categoryFormRef.value)
+  if (!valid) return
 
   categorySaving.value = true
   try {
@@ -85,8 +102,9 @@ async function saveCategory() {
 }
 
 async function saveField() {
-  if (!fieldFormRef.value) return
-  await fieldFormRef.value.validate()
+  trimFieldForm()
+  const valid = await validateForm(fieldFormRef.value)
+  if (!valid) return
   if (!fieldForm.category_id) return
 
   fieldSaving.value = true

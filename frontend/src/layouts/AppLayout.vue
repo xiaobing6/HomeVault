@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { Box, House, Setting, SwitchButton } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { getChineseErrorMessage } from '../api/client'
 import PermissionGate from '../components/PermissionGate.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 
 async function handleLogout() {
@@ -34,7 +35,7 @@ async function handleLogout() {
         </div>
       </div>
 
-      <el-menu router default-active="/" class="nav-menu">
+      <el-menu router :default-active="route.path" class="nav-menu">
         <el-menu-item index="/">
           <el-icon><Box /></el-icon>
           <span>仪表盘</span>
@@ -46,10 +47,12 @@ async function handleLogout() {
           </el-menu-item>
         </PermissionGate>
         <PermissionGate permission="config:manage">
-          <el-menu-item index="/admin/config">
-            <el-icon><Setting /></el-icon>
-            <span>后台管理</span>
-          </el-menu-item>
+          <PermissionGate permission="items:view">
+            <el-menu-item index="/admin/config">
+              <el-icon><Setting /></el-icon>
+              <span>后台管理</span>
+            </el-menu-item>
+          </PermissionGate>
         </PermissionGate>
       </el-menu>
     </el-aside>

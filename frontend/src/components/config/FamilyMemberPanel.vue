@@ -21,9 +21,22 @@ const form = reactive({
 
 const members = computed(() => data.value?.family_members ?? [])
 
+async function validateForm(form?: FormInstance) {
+  if (!form) return false
+  return form.validate().then(() => true).catch(() => false)
+}
+
+function trimMemberForm() {
+  form.name = form.name.trim()
+  form.relation = form.relation.trim()
+  form.phone = form.phone.trim()
+  form.note = form.note.trim()
+}
+
 async function saveMember() {
-  if (!formRef.value) return
-  await formRef.value.validate()
+  trimMemberForm()
+  const valid = await validateForm(formRef.value)
+  if (!valid) return
 
   saving.value = true
   try {
