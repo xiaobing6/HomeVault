@@ -7,7 +7,7 @@ import json
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import bad_request
@@ -566,6 +566,11 @@ async def add_item_image(
         if file_path:
             delete_stored_upload(file_path)
         raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        if file_path:
+            delete_stored_upload(file_path)
+        raise bad_request("\u56fe\u7247\u4fdd\u5b58\u5931\u8d25") from exc
     db.refresh(image)
     return ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
 
@@ -599,6 +604,11 @@ async def add_item_attachment(
         if file_path:
             delete_stored_upload(file_path)
         raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        if file_path:
+            delete_stored_upload(file_path)
+        raise bad_request("\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25") from exc
     db.refresh(attachment)
     return ItemAttachmentResponse.model_validate(
         {**attachment.__dict__, "download_url": public_upload_url(attachment.file_path)}

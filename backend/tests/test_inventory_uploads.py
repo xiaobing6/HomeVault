@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.datastructures import Headers, UploadFile
 
@@ -196,6 +196,34 @@ def test_image_upload_cleans_up_file_when_db_flush_fails(
     assert [path for path in upload_dir.rglob("*") if path.is_file()] == []
 
 
+def test_image_upload_cleans_up_file_when_db_flush_raises_sqlalchemy_error(
+    db_session: Session,
+    inventory_item: Item,
+    upload_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_flush = db_session.flush
+
+    def fail_once(*args: object, **kwargs: object) -> object:
+        monkeypatch.setattr(db_session, "flush", original_flush)
+        raise SQLAlchemyError("forced flush failure")
+
+    monkeypatch.setattr(db_session, "flush", fail_once)
+
+    with pytest.raises(HTTPException) as exc_info:
+        run(
+            inventory.add_item_image(
+                db_session,
+                inventory_item.id,
+                make_upload("front.png", PNG_BYTES, "image/png"),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert db_session.scalars(select(ItemImage)).all() == []
+    assert [path for path in upload_dir.rglob("*") if path.is_file()] == []
+
+
 def test_attachment_upload_rejects_unsafe_unknown_file_without_writing(
     db_session: Session,
     inventory_item: Item,
@@ -222,6 +250,34 @@ def test_attachment_upload_cleans_up_file_when_db_commit_fails(
     def fail_once(*args: object, **kwargs: object) -> object:
         monkeypatch.setattr(db_session, "commit", original_commit)
         raise IntegrityError("insert item_attachments", {}, Exception("forced commit failure"))
+
+    monkeypatch.setattr(db_session, "commit", fail_once)
+
+    with pytest.raises(HTTPException) as exc_info:
+        run(
+            inventory.add_item_attachment(
+                db_session,
+                inventory_item.id,
+                make_upload("manual.pdf", b"%PDF-1.7\n", "application/pdf"),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert db_session.scalars(select(ItemAttachment)).all() == []
+    assert [path for path in upload_dir.rglob("*") if path.is_file()] == []
+
+
+def test_attachment_upload_cleans_up_file_when_db_commit_raises_sqlalchemy_error(
+    db_session: Session,
+    inventory_item: Item,
+    upload_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_commit = db_session.commit
+
+    def fail_once(*args: object, **kwargs: object) -> object:
+        monkeypatch.setattr(db_session, "commit", original_commit)
+        raise SQLAlchemyError("forced commit failure")
 
     monkeypatch.setattr(db_session, "commit", fail_once)
 
