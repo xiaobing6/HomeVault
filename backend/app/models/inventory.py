@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -197,6 +198,15 @@ class ItemTag(Base):
 
 class ItemImage(Base):
     __tablename__ = "item_images"
+    __table_args__ = (
+        Index(
+            "uq_item_images_active_primary_item_id",
+            "item_id",
+            unique=True,
+            sqlite_where=text("is_primary = 1 AND is_archived = 0"),
+            postgresql_where=text("is_primary = true AND is_archived = false"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)

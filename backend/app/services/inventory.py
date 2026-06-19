@@ -52,7 +52,14 @@ from app.schemas.inventory import (
     QuantityAdjustmentCreate,
     TagResponse,
 )
-from app.services.uploads import IMAGE_CONTENT_TYPES, store_upload
+from app.services.uploads import (
+    IMAGE_CONTENT_TYPES,
+    delete_stored_upload,
+    public_upload_url,
+    store_upload,
+    validate_attachment_metadata,
+    validate_image_signature,
+)
 
 try:
     from app.core.errors import not_found
@@ -524,36 +531,43 @@ async def add_item_image(
     content_type = upload.content_type or ""
     if content_type not in IMAGE_CONTENT_TYPES:
         raise bad_request("\u56fe\u7247\u683c\u5f0f\u4e0d\u652f\u6301")
+    await validate_image_signature(upload, content_type)
 
     active_image_exists = db.scalar(
         select(ItemImage.id)
         .where(ItemImage.item_id == item.id, ItemImage.is_archived.is_(False))
         .limit(1)
     ) is not None
-    file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="images")
-    stored_filename = file_path.rsplit("/", 1)[-1]
-    next_sort_order = (
-        db.scalar(select(func.max(ItemImage.sort_order)).where(ItemImage.item_id == item.id)) or 0
-    ) + 10
-    image = ItemImage(
-        item_id=item.id,
-        original_filename=upload.filename or "",
-        stored_filename=stored_filename,
-        file_path=file_path,
-        content_type=content_type,
-        byte_size=byte_size,
-        uploaded_by_id=actor_id,
-        is_primary=False,
-        sort_order=next_sort_order,
-    )
-    db.add(image)
-    flush_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
-    if is_primary or not active_image_exists:
-        set_primary_image(db, item.id, image.id)
-    item.updated_by_id = actor_id
-    commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    file_path = ""
+    try:
+        file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="images")
+        stored_filename = file_path.rsplit("/", 1)[-1]
+        next_sort_order = (
+            db.scalar(select(func.max(ItemImage.sort_order)).where(ItemImage.item_id == item.id)) or 0
+        ) + 10
+        image = ItemImage(
+            item_id=item.id,
+            original_filename=upload.filename or "",
+            stored_filename=stored_filename,
+            file_path=file_path,
+            content_type=content_type,
+            byte_size=byte_size,
+            uploaded_by_id=actor_id,
+            is_primary=False,
+            sort_order=next_sort_order,
+        )
+        db.add(image)
+        flush_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+        if is_primary or not active_image_exists:
+            set_primary_image(db, item.id, image.id)
+        item.updated_by_id = actor_id
+        commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    except HTTPException:
+        if file_path:
+            delete_stored_upload(file_path)
+        raise
     db.refresh(image)
-    return ItemImageResponse.model_validate({**image.__dict__, "url": image.file_path})
+    return ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
 
 
 async def add_item_attachment(
@@ -564,22 +578,31 @@ async def add_item_attachment(
 ) -> ItemAttachmentResponse:
     item = require_item(db, item_id)
     content_type = upload.content_type or ""
-    file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="attachments")
-    stored_filename = file_path.rsplit("/", 1)[-1]
-    attachment = ItemAttachment(
-        item_id=item.id,
-        original_filename=upload.filename or "",
-        stored_filename=stored_filename,
-        file_path=file_path,
-        content_type=content_type,
-        byte_size=byte_size,
-        uploaded_by_id=actor_id,
-    )
-    db.add(attachment)
-    item.updated_by_id = actor_id
-    commit_or_bad_request(db, "\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25")
+    validate_attachment_metadata(upload.filename, content_type)
+    file_path = ""
+    try:
+        file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="attachments")
+        stored_filename = file_path.rsplit("/", 1)[-1]
+        attachment = ItemAttachment(
+            item_id=item.id,
+            original_filename=upload.filename or "",
+            stored_filename=stored_filename,
+            file_path=file_path,
+            content_type=content_type,
+            byte_size=byte_size,
+            uploaded_by_id=actor_id,
+        )
+        db.add(attachment)
+        item.updated_by_id = actor_id
+        commit_or_bad_request(db, "\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25")
+    except HTTPException:
+        if file_path:
+            delete_stored_upload(file_path)
+        raise
     db.refresh(attachment)
-    return ItemAttachmentResponse.model_validate({**attachment.__dict__, "download_url": attachment.file_path})
+    return ItemAttachmentResponse.model_validate(
+        {**attachment.__dict__, "download_url": public_upload_url(attachment.file_path)}
+    )
 
 
 def archive_item_image(
@@ -1100,7 +1123,7 @@ def build_item_summary_response(item: Item) -> ItemSummaryResponse:
         is_container=item.is_container,
         privacy_level=item.privacy_level,
         is_archived=item.is_archived,
-        primary_image_url=primary_image.file_path if primary_image is not None else None,
+        primary_image_url=public_upload_url(primary_image.file_path) if primary_image is not None else None,
         tags=build_tag_responses(item),
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -1181,7 +1204,7 @@ def first_active_primary_image(item: Item):
 
 def build_image_responses(item: Item) -> list[ItemImageResponse]:
     return [
-        ItemImageResponse.model_validate({**image.__dict__, "url": image.file_path})
+        ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
         for image in sorted(
             (image for image in item.images if not image.is_archived),
             key=lambda image: (image.sort_order, image.id),
@@ -1191,7 +1214,9 @@ def build_image_responses(item: Item) -> list[ItemImageResponse]:
 
 def build_attachment_responses(item: Item) -> list[ItemAttachmentResponse]:
     return [
-        ItemAttachmentResponse.model_validate({**attachment.__dict__, "download_url": attachment.file_path})
+        ItemAttachmentResponse.model_validate(
+            {**attachment.__dict__, "download_url": public_upload_url(attachment.file_path)}
+        )
         for attachment in sorted(
             (attachment for attachment in item.attachments if not attachment.is_archived),
             key=lambda attachment: (attachment.created_at, attachment.id),

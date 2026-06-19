@@ -92,6 +92,14 @@ def upgrade() -> None:
     op.create_index("ix_item_images_id", "item_images", ["id"])
     op.create_index("ix_item_images_item_id", "item_images", ["item_id"])
     op.create_index("ix_item_images_is_archived", "item_images", ["is_archived"])
+    op.create_index(
+        "uq_item_images_active_primary_item_id",
+        "item_images",
+        ["item_id"],
+        unique=True,
+        sqlite_where=sa.text("is_primary = 1 AND is_archived = 0"),
+        postgresql_where=sa.text("is_primary = true AND is_archived = false"),
+    )
 
     op.create_table(
         "item_attachments",
@@ -245,6 +253,7 @@ def downgrade() -> None:
     op.drop_index("ix_item_attachments_item_id", table_name="item_attachments")
     op.drop_index("ix_item_attachments_id", table_name="item_attachments")
     op.drop_table("item_attachments")
+    op.drop_index("uq_item_images_active_primary_item_id", table_name="item_images")
     op.drop_index("ix_item_images_is_archived", table_name="item_images")
     op.drop_index("ix_item_images_item_id", table_name="item_images")
     op.drop_index("ix_item_images_id", table_name="item_images")

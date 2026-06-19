@@ -200,3 +200,43 @@ def test_item_loans_reject_duplicate_active_loan_for_same_item(db_session: Sessi
 
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_item_images_reject_duplicate_active_primary_for_same_item(db_session: Session) -> None:
+    from app.models.inventory import Item, ItemImage
+
+    home = HomeSpace(name="Home")
+    residence = Residence(name="Main residence", home_space=home)
+    location = LocationNode(residence=residence, name="Closet", node_type="cabinet")
+    category = Category(code="documents", name="Documents")
+    status = ItemStatus(code="in_stock", name="In stock", semantic="in_inventory", is_system=True)
+    item = Item(
+        name="Passport",
+        category=category,
+        status=status,
+        location_node=location,
+    )
+    item.images.append(
+        ItemImage(
+            original_filename="front.jpg",
+            stored_filename="front.jpg",
+            file_path="items/1/images/front.jpg",
+            content_type="image/jpeg",
+            byte_size=10,
+            is_primary=True,
+        )
+    )
+    item.images.append(
+        ItemImage(
+            original_filename="back.jpg",
+            stored_filename="back.jpg",
+            file_path="items/1/images/back.jpg",
+            content_type="image/jpeg",
+            byte_size=10,
+            is_primary=True,
+        )
+    )
+    db_session.add(item)
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()
