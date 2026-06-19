@@ -30,6 +30,7 @@ from app.models.inventory import (
 )
 from app.schemas.inventory import (
     ArchiveItemRequest,
+    ChangeStatusRequest,
     ItemAttachmentResponse,
     ItemAttributeValueInput,
     ItemAttributeValueResponse,
@@ -43,6 +44,10 @@ from app.schemas.inventory import (
     ItemQuantityChangeResponse,
     ItemSummaryResponse,
     ItemUpdate,
+    LoanCreate,
+    LoanReturn,
+    MoveItemRequest,
+    QuantityAdjustmentCreate,
     TagResponse,
 )
 
@@ -116,6 +121,54 @@ def assert_member_exists(db: Session, member_id: int | None) -> None:
     member = db.get(FamilyMember, member_id)
     if member is None or not member.is_active:
         raise bad_request("\u5bb6\u5ead\u6210\u5458\u4e0d\u5b58\u5728")
+
+
+def find_active_status_by_code(db: Session, code: str) -> ItemStatus | None:
+    return db.scalar(
+        select(ItemStatus)
+        .where(ItemStatus.code == code, ItemStatus.is_active.is_(True))
+        .order_by(ItemStatus.id)
+    )
+
+
+def has_active_loan(db: Session, item_id: int) -> bool:
+    return db.scalar(
+        select(ItemLoan.id)
+        .where(ItemLoan.item_id == item_id, ItemLoan.returned_at.is_(None))
+        .limit(1)
+    ) is not None
+
+
+def add_item_movement(
+    db: Session,
+    *,
+    item: Item,
+    movement_type: str,
+    previous_location_node_id: int | None,
+    new_location_node_id: int | None,
+    previous_container_item_id: int | None,
+    new_container_item_id: int | None,
+    previous_status_id: int | None,
+    new_status_id: int | None,
+    reason: str,
+    note: str,
+    actor_id: int | None,
+) -> None:
+    db.add(
+        ItemMovement(
+            item_id=item.id,
+            previous_location_node_id=previous_location_node_id,
+            new_location_node_id=new_location_node_id,
+            previous_container_item_id=previous_container_item_id,
+            new_container_item_id=new_container_item_id,
+            previous_status_id=previous_status_id,
+            new_status_id=new_status_id,
+            movement_type=movement_type,
+            reason=reason,
+            note=note,
+            actor_id=actor_id,
+        )
+    )
 
 
 def validate_basic_placement(
@@ -467,6 +520,241 @@ def archive_item(
     item.archive_reason = archive_payload.archive_reason
     item.archived_at = utcnow()
     item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return get_item_detail(db, item_id)
+
+
+def move_item(
+    db: Session,
+    item_id: int,
+    payload: MoveItemRequest,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    if payload.location_node_id is None and payload.container_item_id is None:
+        raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668")
+    item_status = require_active_status(db, item.status_id)
+    placement = validate_basic_placement(
+        db,
+        item_status,
+        payload.location_node_id,
+        payload.container_item_id,
+        current_item_id=item.id,
+    )
+    previous_location_node_id = item.location_node_id
+    previous_container_item_id = item.container_item_id
+    previous_status_id = item.status_id
+
+    item.location_node_id = placement.location_node.id if placement.location_node is not None else None
+    item.container_item_id = placement.container_item.id if placement.container_item is not None else None
+    item.updated_by_id = actor_id
+    add_item_movement(
+        db,
+        item=item,
+        movement_type="move",
+        previous_location_node_id=previous_location_node_id,
+        new_location_node_id=item.location_node_id,
+        previous_container_item_id=previous_container_item_id,
+        new_container_item_id=item.container_item_id,
+        previous_status_id=previous_status_id,
+        new_status_id=item.status_id,
+        reason=payload.reason,
+        note=payload.note,
+        actor_id=actor_id,
+    )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return get_item_detail(db, item_id)
+
+
+def change_item_status(
+    db: Session,
+    item_id: int,
+    payload: ChangeStatusRequest,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    target_status = require_active_status(db, payload.status_id)
+    previous_location_node_id = item.location_node_id
+    previous_container_item_id = item.container_item_id
+    previous_status_id = item.status_id
+
+    if target_status.semantic in EXIT_STATUS_SEMANTICS:
+        item.location_node_id = None
+        item.container_item_id = None
+    else:
+        validate_basic_placement(
+            db,
+            target_status,
+            item.location_node_id,
+            item.container_item_id,
+            current_item_id=item.id,
+        )
+    item.status_id = target_status.id
+    item.updated_by_id = actor_id
+    add_item_movement(
+        db,
+        item=item,
+        movement_type="status",
+        previous_location_node_id=previous_location_node_id,
+        new_location_node_id=item.location_node_id,
+        previous_container_item_id=previous_container_item_id,
+        new_container_item_id=item.container_item_id,
+        previous_status_id=previous_status_id,
+        new_status_id=item.status_id,
+        reason=payload.reason,
+        note=payload.note,
+        actor_id=actor_id,
+    )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return get_item_detail(db, item_id)
+
+
+def adjust_quantity(
+    db: Session,
+    item_id: int,
+    payload: QuantityAdjustmentCreate,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    reason = payload.reason.strip()
+    if reason == "":
+        raise bad_request("\u8c03\u6574\u539f\u56e0\u4e0d\u80fd\u4e3a\u7a7a")
+    if payload.new_quantity is None and payload.delta is None:
+        raise bad_request("\u8bf7\u586b\u5199\u8c03\u6574\u540e\u7684\u6570\u91cf\u6216\u53d8\u5316\u6570\u91cf")
+    if payload.new_quantity is not None and payload.delta is not None:
+        raise bad_request("\u8bf7\u9009\u62e9\u8c03\u6574\u540e\u7684\u6570\u91cf\u6216\u53d8\u5316\u6570\u91cf\uff0c\u4e0d\u80fd\u540c\u65f6\u586b\u5199\u4e24\u8005")
+
+    quantity_before = item.quantity
+    quantity_after = payload.new_quantity if payload.new_quantity is not None else quantity_before + payload.delta
+    quantity_delta = quantity_after - quantity_before
+    item.quantity = quantity_after
+    item.updated_by_id = actor_id
+    db.add(
+        ItemQuantityChange(
+            item_id=item.id,
+            quantity_before=quantity_before,
+            quantity_after=quantity_after,
+            quantity_delta=quantity_delta,
+            unit=item.unit,
+            reason=reason,
+            note=payload.note,
+            actor_id=actor_id,
+        )
+    )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return get_item_detail(db, item_id)
+
+
+def list_quantity_changes(db: Session, item_id: int) -> list[ItemQuantityChangeResponse]:
+    require_item(db, item_id)
+    changes = db.scalars(
+        select(ItemQuantityChange)
+        .where(ItemQuantityChange.item_id == item_id)
+        .order_by(ItemQuantityChange.created_at.desc(), ItemQuantityChange.id.desc())
+    ).all()
+    return [ItemQuantityChangeResponse.model_validate(change) for change in changes]
+
+
+def create_loan(
+    db: Session,
+    item_id: int,
+    payload: LoanCreate,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    if has_active_loan(db, item.id):
+        raise bad_request("\u7269\u54c1\u5df2\u6709\u672a\u5f52\u8fd8\u501f\u51fa\u8bb0\u5f55")
+
+    previous_location_node_id = item.location_node_id
+    previous_container_item_id = item.container_item_id
+    previous_status_id = item.status_id
+    loaned_status = find_active_status_by_code(db, "loaned")
+    if loaned_status is not None:
+        item.status_id = loaned_status.id
+    item.updated_by_id = actor_id
+    db.add(
+        ItemLoan(
+            item_id=item.id,
+            borrower_name=payload.borrower_name,
+            borrower_contact=payload.borrower_contact,
+            expected_return_date=payload.expected_return_date,
+            loan_note=payload.loan_note,
+            loan_actor_id=actor_id,
+        )
+    )
+    add_item_movement(
+        db,
+        item=item,
+        movement_type="status",
+        previous_location_node_id=previous_location_node_id,
+        new_location_node_id=item.location_node_id,
+        previous_container_item_id=previous_container_item_id,
+        new_container_item_id=item.container_item_id,
+        previous_status_id=previous_status_id,
+        new_status_id=item.status_id,
+        reason="Loaned",
+        note=payload.loan_note,
+        actor_id=actor_id,
+    )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return get_item_detail(db, item_id)
+
+
+def return_loan(
+    db: Session,
+    item_id: int,
+    loan_id: int,
+    payload: LoanReturn,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    loan = db.get(ItemLoan, loan_id)
+    if loan is None or loan.item_id != item.id:
+        raise not_found("\u501f\u51fa\u8bb0\u5f55\u4e0d\u5b58\u5728")
+    if loan.returned_at is not None:
+        raise bad_request("\u501f\u51fa\u8bb0\u5f55\u5df2\u5f52\u8fd8")
+
+    target_status = (
+        require_active_status(db, payload.target_status_id)
+        if payload.target_status_id is not None
+        else find_active_status_by_code(db, "in_stock")
+    )
+    if target_status is None:
+        target_status = require_active_status(db, item.status_id)
+    placement = validate_basic_placement(
+        db,
+        target_status,
+        payload.location_node_id,
+        payload.container_item_id,
+        current_item_id=item.id,
+    )
+    previous_location_node_id = item.location_node_id
+    previous_container_item_id = item.container_item_id
+    previous_status_id = item.status_id
+
+    loan.returned_at = utcnow()
+    loan.return_location_node_id = placement.location_node.id if placement.location_node is not None else None
+    loan.return_container_item_id = placement.container_item.id if placement.container_item is not None else None
+    loan.return_note = payload.return_note
+    loan.return_actor_id = actor_id
+    item.status_id = target_status.id
+    item.location_node_id = loan.return_location_node_id
+    item.container_item_id = loan.return_container_item_id
+    item.updated_by_id = actor_id
+    add_item_movement(
+        db,
+        item=item,
+        movement_type="status",
+        previous_location_node_id=previous_location_node_id,
+        new_location_node_id=item.location_node_id,
+        previous_container_item_id=previous_container_item_id,
+        new_container_item_id=item.container_item_id,
+        previous_status_id=previous_status_id,
+        new_status_id=item.status_id,
+        reason="Returned",
+        note=payload.return_note,
+        actor_id=actor_id,
+    )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
     return get_item_detail(db, item_id)
 

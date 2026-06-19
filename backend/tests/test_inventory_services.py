@@ -19,9 +19,29 @@ from app.models.configuration import (
     LocationNode,
     Residence,
 )
-from app.models.inventory import Item, ItemLoan, ItemQuantityChange, Tag
+from app.models.inventory import Item, ItemLoan, ItemMovement, ItemQuantityChange, Tag
 from app.schemas.inventory import ItemCreate, ItemListQuery, ItemUpdate
-from app.services.inventory import archive_item, create_item, get_item_detail, list_items, update_item
+from app.schemas.inventory import (
+    ChangeStatusRequest,
+    LoanCreate,
+    LoanReturn,
+    MoveItemRequest,
+    QuantityAdjustmentCreate,
+)
+from app.services.inventory import (
+    INITIAL_QUANTITY_REASON,
+    adjust_quantity,
+    archive_item,
+    change_item_status,
+    create_item,
+    create_loan,
+    get_item_detail,
+    list_items,
+    list_quantity_changes,
+    move_item,
+    return_loan,
+    update_item,
+)
 
 
 @pytest.fixture()
@@ -91,7 +111,8 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
     AttributeOption(definition=storage_flags, label="Cold", value="cold", sort_order=20)
     in_stock = ItemStatus(code="in_stock", name="In stock", semantic="in_inventory", sort_order=10, is_system=True)
     loaned = ItemStatus(code="loaned", name="Loaned", semantic="away", sort_order=20, is_system=True)
-    db_session.add_all([creator, editor, archiver, home, category, in_stock, loaned])
+    removed = ItemStatus(code="removed", name="Removed", semantic="removed", sort_order=30, is_system=True)
+    db_session.add_all([creator, editor, archiver, home, category, in_stock, loaned, removed])
     db_session.commit()
 
     return {
@@ -110,6 +131,7 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
         "storage_flags": storage_flags,
         "in_stock": in_stock,
         "loaned": loaned,
+        "removed": removed,
     }
 
 
@@ -413,3 +435,244 @@ def test_archive_item_hides_from_default_list(
     assert list_items(db_session, ItemListQuery()).items == []
     assert [item.id for item in list_items(db_session, ItemListQuery(include_archived=True)).items] == [created.id]
     assert db_session.scalar(select(Tag).where(Tag.normalized_name == "important")) is not None
+
+
+def test_move_item_writes_movement_history_and_updates_location_then_container(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed, is_container=False))
+    container = create_item(db_session, make_create_payload(inventory_seed, name="Archive box"))
+
+    moved_to_location = move_item(
+        db_session,
+        item.id,
+        MoveItemRequest(location_node_id=inventory_seed["closet"].id, reason="Reorganized", note="Top shelf"),
+        actor_id=7,
+    )
+    moved_to_container = move_item(
+        db_session,
+        item.id,
+        MoveItemRequest(container_item_id=container.id, reason="Boxed"),
+        actor_id=42,
+    )
+
+    movements = db_session.scalars(
+        select(ItemMovement).where(ItemMovement.item_id == item.id).order_by(ItemMovement.id)
+    ).all()
+
+    assert moved_to_location.location_node_id == inventory_seed["closet"].id
+    assert moved_to_container.location_node_id is None
+    assert moved_to_container.container_item_id == container.id
+    assert [movement.movement_type for movement in movements] == ["move", "move"]
+    assert movements[0].previous_location_node_id == inventory_seed["drawer"].id
+    assert movements[0].new_location_node_id == inventory_seed["closet"].id
+    assert movements[0].reason == "Reorganized"
+    assert movements[0].note == "Top shelf"
+    assert movements[0].actor_id == 7
+    assert movements[1].previous_location_node_id == inventory_seed["closet"].id
+    assert movements[1].new_container_item_id == container.id
+    assert movements[1].previous_status_id == inventory_seed["in_stock"].id
+    assert movements[1].new_status_id == inventory_seed["in_stock"].id
+
+
+def test_move_item_rejects_self_or_descendant_container(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    parent = create_item(db_session, make_create_payload(inventory_seed, name="Parent box"))
+    child = create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            name="Child box",
+            location_node_id=None,
+            container_item_id=parent.id,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as self_exc:
+        move_item(db_session, parent.id, MoveItemRequest(container_item_id=parent.id))
+    with pytest.raises(HTTPException) as descendant_exc:
+        move_item(db_session, parent.id, MoveItemRequest(container_item_id=child.id))
+
+    assert self_exc.value.status_code == 400
+    assert descendant_exc.value.status_code == 400
+
+
+def test_move_item_rejects_container_nesting_over_max_depth(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    deepest_container_id: int | None = None
+    for index in range(5):
+        created = create_item(
+            db_session,
+            make_create_payload(
+                inventory_seed,
+                name=f"Depth {index}",
+                location_node_id=None if deepest_container_id is not None else inventory_seed["drawer"].id,
+                container_item_id=deepest_container_id,
+            ),
+        )
+        deepest_container_id = created.id
+    loose_item = create_item(db_session, make_create_payload(inventory_seed, name="Loose item", is_container=False))
+
+    with pytest.raises(HTTPException) as exc_info:
+        move_item(db_session, loose_item.id, MoveItemRequest(container_item_id=deepest_container_id))
+
+    assert exc_info.value.status_code == 400
+
+
+def test_change_item_status_writes_movement_and_exit_status_clears_placement(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+
+    changed = change_item_status(
+        db_session,
+        item.id,
+        ChangeStatusRequest(status_id=inventory_seed["removed"].id, reason="Disposed", note="Expired"),
+        actor_id=99,
+    )
+    movement = db_session.scalar(
+        select(ItemMovement).where(ItemMovement.item_id == item.id).order_by(ItemMovement.id.desc())
+    )
+
+    assert changed.status_id == inventory_seed["removed"].id
+    assert changed.location_node_id is None
+    assert changed.container_item_id is None
+    assert movement is not None
+    assert movement.movement_type == "status"
+    assert movement.previous_location_node_id == inventory_seed["drawer"].id
+    assert movement.new_location_node_id is None
+    assert movement.previous_status_id == inventory_seed["in_stock"].id
+    assert movement.new_status_id == inventory_seed["removed"].id
+    assert movement.reason == "Disposed"
+    assert movement.note == "Expired"
+    assert movement.actor_id == 99
+
+
+def test_adjust_quantity_by_delta_and_new_quantity_writes_history(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed, quantity=Decimal("2.00"), unit="pcs"))
+
+    by_delta = adjust_quantity(
+        db_session,
+        item.id,
+        QuantityAdjustmentCreate(delta=Decimal("3.50"), reason="Restocked", note="Batch A"),
+        actor_id=7,
+    )
+    by_total = adjust_quantity(
+        db_session,
+        item.id,
+        QuantityAdjustmentCreate(new_quantity=Decimal("4.00"), reason="Counted"),
+        actor_id=42,
+    )
+    changes = list_quantity_changes(db_session, item.id)
+
+    assert by_delta.quantity == Decimal("5.50")
+    assert by_total.quantity == Decimal("4.00")
+    assert [change.reason for change in changes] == ["Counted", "Restocked", INITIAL_QUANTITY_REASON]
+    assert changes[0].quantity_before == Decimal("5.50")
+    assert changes[0].quantity_after == Decimal("4.00")
+    assert changes[0].quantity_delta == Decimal("-1.50")
+    assert changes[0].unit == "pcs"
+    assert changes[0].actor_id == 42
+    assert changes[1].quantity_before == Decimal("2.00")
+    assert changes[1].quantity_after == Decimal("5.50")
+    assert changes[1].quantity_delta == Decimal("3.50")
+    assert changes[1].note == "Batch A"
+    assert changes[1].actor_id == 7
+
+
+def test_adjust_quantity_requires_reason_at_service_layer(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+    payload = QuantityAdjustmentCreate.model_construct(delta=Decimal("1.00"), reason="   ", note="")
+
+    with pytest.raises(HTTPException) as exc_info:
+        adjust_quantity(db_session, item.id, payload)
+
+    assert exc_info.value.status_code == 400
+
+
+def test_create_loan_rejects_active_loan_and_writes_status_movement(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+
+    loaned = create_loan(
+        db_session,
+        item.id,
+        LoanCreate(borrower_name="Taylor", borrower_contact="taylor@example.test", loan_note="Weekend"),
+        actor_id=7,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        create_loan(db_session, item.id, LoanCreate(borrower_name="Jordan"))
+    movement = db_session.scalar(
+        select(ItemMovement).where(ItemMovement.item_id == item.id).order_by(ItemMovement.id.desc())
+    )
+
+    assert loaned.status_id == inventory_seed["loaned"].id
+    assert loaned.loans[0].borrower_name == "Taylor"
+    assert loaned.loans[0].loan_actor_id == 7
+    assert exc_info.value.status_code == 400
+    assert movement is not None
+    assert movement.movement_type == "status"
+    assert movement.previous_status_id == inventory_seed["in_stock"].id
+    assert movement.new_status_id == inventory_seed["loaned"].id
+    assert movement.reason == "Loaned"
+    assert movement.note == "Weekend"
+    assert movement.actor_id == 7
+
+
+def test_return_loan_sets_returned_at_updates_placement_status_and_writes_movement(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+    loaned = create_loan(db_session, item.id, LoanCreate(borrower_name="Taylor"), actor_id=7)
+    loan_id = loaned.loans[0].id
+
+    returned = return_loan(
+        db_session,
+        item.id,
+        loan_id,
+        LoanReturn(
+            location_node_id=inventory_seed["closet"].id,
+            target_status_id=inventory_seed["in_stock"].id,
+            return_note="Back on shelf",
+        ),
+        actor_id=42,
+    )
+    loan = db_session.get(ItemLoan, loan_id)
+    with pytest.raises(HTTPException) as exc_info:
+        return_loan(db_session, item.id, loan_id, LoanReturn(location_node_id=inventory_seed["drawer"].id))
+    movement = db_session.scalar(
+        select(ItemMovement).where(ItemMovement.item_id == item.id).order_by(ItemMovement.id.desc())
+    )
+
+    assert returned.status_id == inventory_seed["in_stock"].id
+    assert returned.location_node_id == inventory_seed["closet"].id
+    assert returned.container_item_id is None
+    assert loan is not None
+    assert loan.returned_at is not None
+    assert loan.return_location_node_id == inventory_seed["closet"].id
+    assert loan.return_note == "Back on shelf"
+    assert loan.return_actor_id == 42
+    assert exc_info.value.status_code == 400
+    assert movement is not None
+    assert movement.movement_type == "status"
+    assert movement.previous_status_id == inventory_seed["loaned"].id
+    assert movement.new_status_id == inventory_seed["in_stock"].id
+    assert movement.previous_location_node_id == inventory_seed["drawer"].id
+    assert movement.new_location_node_id == inventory_seed["closet"].id
+    assert movement.note == "Back on shelf"
+    assert movement.actor_id == 42
