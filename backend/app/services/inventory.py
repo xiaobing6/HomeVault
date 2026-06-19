@@ -39,6 +39,7 @@ from app.schemas.inventory import (
     ItemCreate,
     ItemDetailResponse,
     ItemListResponse,
+    ItemImageUpdate,
     ItemImageResponse,
     ItemListQuery,
     ItemLoanResponse,
@@ -50,6 +51,7 @@ from app.schemas.inventory import (
     LoanReturn,
     MoveItemRequest,
     QuantityAdjustmentCreate,
+    TagCreate,
     TagResponse,
 )
 from app.services.uploads import (
@@ -656,6 +658,31 @@ def archive_item_attachment(
     return get_item_detail(db, item_id)
 
 
+def update_item_image_metadata(
+    db: Session,
+    item_id: int,
+    image_id: int,
+    payload: ItemImageUpdate,
+    actor_id: int | None = None,
+) -> ItemImageResponse:
+    item = require_item(db, item_id)
+    image = db.get(ItemImage, image_id)
+    if image is None or image.item_id != item.id or image.is_archived:
+        raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
+    fields = payload.model_fields_set
+    if "sort_order" in fields and payload.sort_order is not None:
+        image.sort_order = payload.sort_order
+    if "is_primary" in fields and payload.is_primary is not None:
+        if payload.is_primary:
+            set_primary_image(db, item.id, image.id)
+        else:
+            image.is_primary = False
+    item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    db.refresh(image)
+    return ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
+
+
 def archive_item(
     db: Session,
     item_id: int,
@@ -803,6 +830,10 @@ def list_quantity_changes(db: Session, item_id: int) -> list[ItemQuantityChangeR
         .order_by(ItemQuantityChange.created_at.desc(), ItemQuantityChange.id.desc())
     ).all()
     return [ItemQuantityChangeResponse.model_validate(change) for change in changes]
+
+
+def list_movements(db: Session, item_id: int) -> list[ItemMovementResponse]:
+    return get_item_detail(db, item_id).movements
 
 
 def create_loan(
@@ -972,6 +1003,32 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
         page=query.page,
         page_size=query.page_size,
     )
+
+
+def list_tags(db: Session, search: str | None = None) -> list[TagResponse]:
+    stmt = select(Tag)
+    if search:
+        search_term = f"%{search.strip()}%"
+        if search_term != "%%":
+            normalized_term = f"%{normalize_tag(search)}%"
+            stmt = stmt.where(or_(Tag.name.ilike(search_term), Tag.normalized_name.ilike(normalized_term)))
+    tags = db.scalars(stmt.order_by(Tag.normalized_name, Tag.id)).all()
+    return [TagResponse.model_validate(tag) for tag in tags]
+
+
+def create_tag(db: Session, payload: TagCreate) -> TagResponse:
+    normalized_name = normalize_tag(payload.name)
+    if normalized_name == "":
+        raise bad_request("\u6807\u7b7e\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a")
+    if len(normalized_name) > 120:
+        raise bad_request("\u6807\u7b7e\u8fc7\u957f")
+    tag = db.scalar(select(Tag).where(Tag.normalized_name == normalized_name))
+    if tag is None:
+        tag = Tag(name=" ".join(payload.name.strip().split()), normalized_name=normalized_name)
+        db.add(tag)
+        commit_or_bad_request(db, "\u6807\u7b7e\u4fdd\u5b58\u5931\u8d25")
+        db.refresh(tag)
+    return TagResponse.model_validate(tag)
 
 
 def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:

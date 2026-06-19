@@ -269,6 +269,15 @@ class ArchiveItemRequest(RequestModel):
     archive_reason: str = Field(default="", max_length=255)
 
 
+class ItemImageUpdate(RequestModel):
+    is_primary: bool | None = None
+    sort_order: int | None = None
+
+
+class TagCreate(RequestModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
 class MediaMetadataResponse(ResponseModel):
     images: list[ItemImageResponse] = Field(default_factory=list)
     attachments: list[ItemAttachmentResponse] = Field(default_factory=list)
