@@ -59,4 +59,5 @@ def seed_auth_baseline(db: Session, admin_username: str, admin_password: str) ->
     db.commit()
     db.refresh(admin)
     ensure_core_configuration_seed(db)
+    db.refresh(admin)
     return admin

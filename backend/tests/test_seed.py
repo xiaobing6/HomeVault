@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.auth import Permission, Role, User
+from app.models.configuration import HomeSpace, ItemStatus
 from app.services.seed import seed_auth_baseline
 
 
@@ -22,3 +23,19 @@ def test_seed_auth_baseline_creates_admin_user(db_session: Session) -> None:
     assert "items:view" in {permission.code for permission in permissions}
     assert users == [admin]
     assert {role.code for role in admin.roles} == {"admin"}
+
+
+def test_seed_auth_baseline_returns_usable_admin_after_session_closes(db_session: Session) -> None:
+    admin = seed_auth_baseline(
+        db_session,
+        admin_username="admin",
+        admin_password="ChangeMe123!",
+    )
+
+    assert db_session.scalar(select(HomeSpace)) is not None
+    assert db_session.scalar(select(ItemStatus).where(ItemStatus.code == "in_stock")) is not None
+
+    db_session.close()
+
+    assert admin.id > 0
+    assert admin.username == "admin"
