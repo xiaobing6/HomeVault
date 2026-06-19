@@ -56,8 +56,38 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
         field_type="single_select",
         sort_order=30,
     )
+    purchase_price = AttributeDefinition(
+        category=category,
+        key="purchase_price",
+        name="Purchase price",
+        field_type="money",
+        sort_order=40,
+    )
+    warranty_date = AttributeDefinition(
+        category=category,
+        key="warranty_date",
+        name="Warranty date",
+        field_type="date",
+        sort_order=50,
+    )
+    verified = AttributeDefinition(
+        category=category,
+        key="verified",
+        name="Verified",
+        field_type="boolean",
+        sort_order=60,
+    )
+    storage_flags = AttributeDefinition(
+        category=category,
+        key="storage_flags",
+        name="Storage flags",
+        field_type="multi_select",
+        sort_order=70,
+    )
     AttributeOption(definition=importance, label="High", value="high", sort_order=10)
     AttributeOption(definition=importance, label="Low", value="low", sort_order=20)
+    AttributeOption(definition=storage_flags, label="Dry", value="dry", sort_order=10)
+    AttributeOption(definition=storage_flags, label="Cold", value="cold", sort_order=20)
     in_stock = ItemStatus(code="in_stock", name="In stock", semantic="in_inventory", sort_order=10, is_system=True)
     loaned = ItemStatus(code="loaned", name="Loaned", semantic="away", sort_order=20, is_system=True)
     db_session.add_all([creator, editor, archiver, home, category, in_stock, loaned])
@@ -73,6 +103,10 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
         "expire_date": expire_date,
         "serial_number": serial_number,
         "importance": importance,
+        "purchase_price": purchase_price,
+        "warranty_date": warranty_date,
+        "verified": verified,
+        "storage_flags": storage_flags,
         "in_stock": in_stock,
         "loaned": loaned,
     }
@@ -139,6 +173,41 @@ def test_create_item_persists_custom_values_tags_initial_quantity_and_location(
     assert [tag.normalized_name for tag in detail.tags] == ["important", "travel"]
 
 
+def test_create_item_normalizes_custom_values_for_persistence(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    expire_date = inventory_seed["expire_date"]
+    purchase_price = inventory_seed["purchase_price"]
+    warranty_date = inventory_seed["warranty_date"]
+    verified = inventory_seed["verified"]
+    storage_flags = inventory_seed["storage_flags"]
+
+    detail = create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            attribute_values=[
+                {"attribute_definition_id": expire_date.id, "value": "2030-12-31"},
+                {"attribute_definition_id": purchase_price.id, "value": "0012.3400"},
+                {"attribute_definition_id": warranty_date.id, "value": " 2028-01-05 "},
+                {"attribute_definition_id": verified.id, "value": "YES"},
+                {"attribute_definition_id": storage_flags.id, "value": "cold, dry"},
+            ],
+        ),
+    )
+
+    values = {
+        value.attribute_key: value.value
+        for value in get_item_detail(db_session, detail.id).attribute_values
+    }
+
+    assert values["purchase_price"] == "12.34"
+    assert values["warranty_date"] == "2028-01-05"
+    assert values["verified"] == "true"
+    assert values["storage_flags"] == '["cold","dry"]'
+
+
 def test_create_item_rejects_required_missing_custom_value(
     db_session: Session,
     inventory_seed: dict[str, object],
@@ -196,9 +265,51 @@ def test_list_items_searches_name_tag_and_custom_value(
     by_tag = list_items(db_session, ItemListQuery(search="photo"))
     by_custom_value = list_items(db_session, ItemListQuery(search="SN-001"))
 
-    assert [item.name for item in by_name] == ["Passport folder"]
-    assert [item.name for item in by_tag] == ["Camera case"]
-    assert [item.name for item in by_custom_value] == ["Camera case", "Passport folder"]
+    assert [item.name for item in by_name.items] == ["Passport folder"]
+    assert [item.name for item in by_tag.items] == ["Camera case"]
+    assert [item.name for item in by_custom_value.items] == ["Camera case", "Passport folder"]
+    assert by_custom_value.total == 2
+    assert by_custom_value.page == 1
+    assert by_custom_value.page_size == 20
+
+
+def test_list_items_returns_pagination_metadata_and_slices_results(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    create_item(db_session, make_create_payload(inventory_seed, name="Alpha"))
+    create_item(db_session, make_create_payload(inventory_seed, name="Bravo"))
+    create_item(db_session, make_create_payload(inventory_seed, name="Charlie"))
+
+    page = list_items(db_session, ItemListQuery(sort="name_asc", page=2, page_size=1))
+
+    assert [item.name for item in page.items] == ["Bravo"]
+    assert page.total == 3
+    assert page.page == 2
+    assert page.page_size == 1
+
+
+def test_list_items_filters_by_container_placement(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    container = create_item(db_session, make_create_payload(inventory_seed, name="Document box"))
+    create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            name="Birth certificate",
+            location_node_id=None,
+            container_item_id=container.id,
+            is_container=False,
+        ),
+    )
+    create_item(db_session, make_create_payload(inventory_seed, name="Loose passport"))
+
+    placed_in_container = list_items(db_session, ItemListQuery(container_item_id=container.id))
+
+    assert [item.name for item in placed_in_container.items] == ["Birth certificate"]
+    assert placed_in_container.total == 1
 
 
 def test_item_detail_includes_tags_custom_values_and_paths(
@@ -263,6 +374,6 @@ def test_archive_item_hides_from_default_list(
     archived = archive_item(db_session, created.id, actor_id=99)
 
     assert archived.is_archived is True
-    assert list_items(db_session, ItemListQuery()) == []
-    assert [item.id for item in list_items(db_session, ItemListQuery(include_archived=True))] == [created.id]
+    assert list_items(db_session, ItemListQuery()).items == []
+    assert [item.id for item in list_items(db_session, ItemListQuery(include_archived=True)).items] == [created.id]
     assert db_session.scalar(select(Tag).where(Tag.normalized_name == "important")) is not None

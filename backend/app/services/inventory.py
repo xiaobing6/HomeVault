@@ -6,7 +6,7 @@ from decimal import Decimal, InvalidOperation
 import json
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -35,6 +35,7 @@ from app.schemas.inventory import (
     ItemAttributeValueResponse,
     ItemCreate,
     ItemDetailResponse,
+    ItemListResponse,
     ItemImageResponse,
     ItemListQuery,
     ItemLoanResponse,
@@ -185,7 +186,7 @@ def validate_attribute_values(
             raise bad_request(f"{definition.name}\u4e0d\u80fd\u4e3a\u7a7a")
         if raw_value == "":
             continue
-        assert_attribute_value_matches_definition(definition, raw_value)
+        value_by_definition_id[definition.id] = normalize_attribute_value(definition, raw_value)
 
     return {
         definition_id: raw_value.strip()
@@ -215,6 +216,65 @@ def assert_attribute_value_matches_definition(
         return
     if field_type == "multi_select":
         assert_multi_select_value(definition, raw_value)
+
+
+def normalize_attribute_value(definition: AttributeDefinition, raw_value: str) -> str:
+    field_type = definition.field_type
+    if field_type in {"number", "money"}:
+        return normalize_decimal_value(definition, raw_value)
+    if field_type == "date":
+        return normalize_date_value(definition, raw_value)
+    if field_type == "datetime":
+        return normalize_datetime_value(definition, raw_value)
+    if field_type == "boolean":
+        return normalize_boolean_value(definition, raw_value)
+    if field_type == "single_select":
+        assert_single_select_value(definition, raw_value)
+        return raw_value
+    if field_type == "multi_select":
+        selected_values = parse_multi_select_value(definition, raw_value)
+        allowed_values = active_option_values(definition)
+        if not selected_values or any(value not in allowed_values for value in selected_values):
+            raise bad_request(f"{definition.name}\u9009\u9879\u4e0d\u5408\u6cd5")
+        return json.dumps(selected_values, ensure_ascii=False, separators=(",", ":"))
+    assert_attribute_value_matches_definition(definition, raw_value)
+    return raw_value.strip()
+
+
+def normalize_decimal_value(definition: AttributeDefinition, raw_value: str) -> str:
+    try:
+        value = Decimal(raw_value)
+    except (InvalidOperation, ValueError) as exc:
+        raise bad_request(f"{definition.name}\u683c\u5f0f\u4e0d\u6b63\u786e") from exc
+    if not value.is_finite():
+        raise bad_request(f"{definition.name}\u683c\u5f0f\u4e0d\u6b63\u786e")
+    normalized = format(value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized or "0"
+
+
+def normalize_date_value(definition: AttributeDefinition, raw_value: str) -> str:
+    try:
+        return date.fromisoformat(raw_value).isoformat()
+    except ValueError as exc:
+        raise bad_request(f"{definition.name}\u683c\u5f0f\u4e0d\u6b63\u786e") from exc
+
+
+def normalize_datetime_value(definition: AttributeDefinition, raw_value: str) -> str:
+    try:
+        return datetime.fromisoformat(raw_value.replace("Z", "+00:00")).isoformat()
+    except ValueError as exc:
+        raise bad_request(f"{definition.name}\u683c\u5f0f\u4e0d\u6b63\u786e") from exc
+
+
+def normalize_boolean_value(definition: AttributeDefinition, raw_value: str) -> str:
+    normalized = raw_value.strip().lower()
+    if normalized in {"true", "1", "yes"}:
+        return "true"
+    if normalized in {"false", "0", "no"}:
+        return "false"
+    raise bad_request(f"{definition.name}\u683c\u5f0f\u4e0d\u6b63\u786e")
 
 
 def assert_decimal_value(definition: AttributeDefinition, raw_value: str) -> None:
@@ -403,8 +463,8 @@ def archive_item(
     return get_item_detail(db, item_id)
 
 
-def list_items(db: Session, query: ItemListQuery) -> list[ItemSummaryResponse]:
-    stmt = select(Item).options(*item_response_options())
+def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
+    stmt = select(Item)
     if not query.include_archived:
         stmt = stmt.where(Item.is_archived.is_(False))
     if query.category_id is not None:
@@ -413,6 +473,8 @@ def list_items(db: Session, query: ItemListQuery) -> list[ItemSummaryResponse]:
         stmt = stmt.where(Item.status_id == query.status_id)
     if query.location_node_id is not None:
         stmt = stmt.where(Item.location_node_id == query.location_node_id)
+    if query.container_item_id is not None:
+        stmt = stmt.where(Item.container_item_id == query.container_item_id)
     if query.residence_id is not None:
         stmt = stmt.where(Item.location_node.has(LocationNode.residence_id == query.residence_id))
     if query.owner_member_id is not None:
@@ -452,9 +514,20 @@ def list_items(db: Session, query: ItemListQuery) -> list[ItemSummaryResponse]:
     elif query.is_on_loan is False:
         stmt = stmt.where(~Item.status.has(ItemStatus.code == "loaned"))
 
-    stmt = apply_list_sort(stmt, query.sort)
+    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+    stmt = (
+        apply_list_sort(stmt, query.sort)
+        .options(*item_response_options())
+        .limit(query.page_size)
+        .offset((query.page - 1) * query.page_size)
+    )
     items = db.scalars(stmt).unique().all()
-    return [build_item_summary_response(item) for item in items]
+    return ItemListResponse(
+        items=[build_item_summary_response(item) for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+    )
 
 
 def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:

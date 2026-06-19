@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from app.schemas.inventory import (
     ItemCreate,
     ItemDetailResponse,
+    ItemListResponse,
     ItemListQuery,
     ItemUpdate,
     LoanCreate,
@@ -27,6 +28,16 @@ def test_item_create_requires_name_and_category() -> None:
 
 def test_item_list_query_defaults_hide_archived_items() -> None:
     assert ItemListQuery().include_archived is False
+    assert ItemListQuery().page == 1
+    assert ItemListQuery().page_size == 20
+
+
+def test_item_list_query_rejects_invalid_page_bounds() -> None:
+    with pytest.raises(ValidationError):
+        ItemListQuery(page=0)
+
+    with pytest.raises(ValidationError):
+        ItemListQuery(page_size=101)
 
 
 def test_item_update_excludes_dedicated_lifecycle_fields() -> None:
@@ -218,3 +229,46 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
     assert serialized["movements"][0]["new_location_node_name"] == "主卧衣柜"
     assert serialized["quantity_changes"][0]["quantity_after"] == "2.50"
     assert serialized["loans"][0]["expected_return_date"] == "2026-07-01"
+
+
+def test_item_list_response_serializes_paged_payload() -> None:
+    now = datetime(2026, 6, 19, 12, 0, tzinfo=timezone.utc)
+
+    response = ItemListResponse(
+        items=[
+            {
+                "id": 1,
+                "name": "Passport folder",
+                "description": "",
+                "category_id": 2,
+                "category_name": "Documents",
+                "status_id": 3,
+                "status_name": "In stock",
+                "status_semantic": "in_inventory",
+                "quantity": Decimal("1.00"),
+                "unit": "pcs",
+                "location_node_id": None,
+                "location_node_name": None,
+                "residence_id": None,
+                "residence_name": None,
+                "container_item_id": None,
+                "container_item_name": None,
+                "is_container": False,
+                "privacy_level": "normal",
+                "is_archived": False,
+                "tags": [],
+                "created_at": now,
+                "updated_at": now,
+            },
+        ],
+        total=3,
+        page=2,
+        page_size=1,
+    )
+
+    serialized = response.model_dump(mode="json")
+
+    assert serialized["total"] == 3
+    assert serialized["page"] == 2
+    assert serialized["page_size"] == 1
+    assert serialized["items"][0]["quantity"] == "1.00"

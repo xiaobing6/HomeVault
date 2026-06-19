@@ -63,6 +63,7 @@ class ItemListQuery(RequestModel):
     category_id: int | None = None
     residence_id: int | None = None
     location_node_id: int | None = None
+    container_item_id: int | None = None
     status_id: int | None = None
     tag: str | None = None
     is_on_loan: bool | None = None
@@ -71,6 +72,8 @@ class ItemListQuery(RequestModel):
     keeper_member_id: int | None = None
     container_only: bool | None = None
     sort: str = "updated_desc"
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
 
 class TagResponse(ResponseModel):
@@ -117,6 +120,13 @@ class ItemSummaryResponse(ResponseModel):
     tags: list[TagResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class ItemListResponse(ResponseModel):
+    items: list[ItemSummaryResponse] = Field(default_factory=list)
+    total: int
+    page: int
+    page_size: int
 
 
 class ItemImageResponse(ResponseModel):
