@@ -271,7 +271,7 @@ class ArchiveItemRequest(RequestModel):
 
 class ItemImageUpdate(RequestModel):
     is_primary: bool | None = None
-    sort_order: int | None = None
+    sort_order: int | None = Field(default=None, ge=0)
 
 
 class TagCreate(RequestModel):

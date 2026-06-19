@@ -672,11 +672,8 @@ def update_item_image_metadata(
     fields = payload.model_fields_set
     if "sort_order" in fields and payload.sort_order is not None:
         image.sort_order = payload.sort_order
-    if "is_primary" in fields and payload.is_primary is not None:
-        if payload.is_primary:
-            set_primary_image(db, item.id, image.id)
-        else:
-            image.is_primary = False
+    if "is_primary" in fields and payload.is_primary is True:
+        set_primary_image(db, item.id, image.id)
     item.updated_by_id = actor_id
     commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
     db.refresh(image)

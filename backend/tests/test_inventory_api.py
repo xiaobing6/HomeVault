@@ -266,8 +266,11 @@ def test_inventory_api_uploads_image_and_attachment(client: TestClient, db_sessi
         files={"file": ("front.png", PNG_BYTES, "image/png")},
         data={"is_primary": "true"},
     )
+    assert image.status_code == 201
+    image_id = image.json()["id"]
+
     image_update = client.patch(
-        f"/api/items/{item['id']}/images/{image.json()['id']}",
+        f"/api/items/{item['id']}/images/{image_id}",
         headers=headers,
         json={"is_primary": True, "sort_order": 5},
     )
@@ -276,19 +279,20 @@ def test_inventory_api_uploads_image_and_attachment(client: TestClient, db_sessi
         headers=headers,
         files={"file": ("manual.pdf", b"%PDF-1.7\n", "application/pdf")},
     )
+    assert attachment.status_code == 201
+    attachment_id = attachment.json()["id"]
+
     detail = client.get(f"/api/items/{item['id']}", headers=headers)
-    image_delete = client.delete(f"/api/items/{item['id']}/images/{image.json()['id']}", headers=headers)
+    image_delete = client.delete(f"/api/items/{item['id']}/images/{image_id}", headers=headers)
     attachment_delete = client.delete(
-        f"/api/items/{item['id']}/attachments/{attachment.json()['id']}",
+        f"/api/items/{item['id']}/attachments/{attachment_id}",
         headers=headers,
     )
 
-    assert image.status_code == 201
     assert image.json()["url"].startswith("/uploads/items/")
     assert image.json()["is_primary"] is True
     assert image_update.status_code == 200
     assert image_update.json()["sort_order"] == 5
-    assert attachment.status_code == 201
     assert attachment.json()["download_url"].startswith("/uploads/items/")
     assert detail.json()["images"][0]["url"].startswith("/uploads/items/")
     assert detail.json()["attachments"][0]["download_url"].startswith("/uploads/items/")
@@ -296,3 +300,30 @@ def test_inventory_api_uploads_image_and_attachment(client: TestClient, db_sessi
     assert image_delete.json()["images"] == []
     assert attachment_delete.status_code == 200
     assert attachment_delete.json()["attachments"] == []
+
+
+def test_inventory_api_ignores_false_primary_image_update(client: TestClient, db_session: Session) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    item = create_item(client, headers, ids)
+    image = client.post(
+        f"/api/items/{item['id']}/images",
+        headers=headers,
+        files={"file": ("front.png", PNG_BYTES, "image/png")},
+        data={"is_primary": "true"},
+    )
+    assert image.status_code == 201
+    image_id = image.json()["id"]
+
+    image_update = client.patch(
+        f"/api/items/{item['id']}/images/{image_id}",
+        headers=headers,
+        json={"is_primary": False},
+    )
+    detail = client.get(f"/api/items/{item['id']}", headers=headers)
+
+    assert image_update.status_code == 200
+    assert image_update.json()["is_primary"] is True
+    assert detail.status_code == 200
+    assert detail.json()["images"][0]["is_primary"] is True
+    assert detail.json()["primary_image_url"] == detail.json()["images"][0]["url"]
