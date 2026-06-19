@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -21,7 +21,9 @@ from app.models.configuration import (
 )
 from app.models.inventory import (
     Item,
+    ItemAttachment,
     ItemAttributeValue,
+    ItemImage,
     ItemLoan,
     ItemMovement,
     ItemQuantityChange,
@@ -50,6 +52,7 @@ from app.schemas.inventory import (
     QuantityAdjustmentCreate,
     TagResponse,
 )
+from app.services.uploads import IMAGE_CONTENT_TYPES, store_upload
 
 try:
     from app.core.errors import not_found
@@ -507,6 +510,116 @@ def update_item(
     item.updated_by_id = actor_id
 
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return get_item_detail(db, item_id)
+
+
+async def add_item_image(
+    db: Session,
+    item_id: int,
+    upload: UploadFile,
+    is_primary: bool = False,
+    actor_id: int | None = None,
+) -> ItemImageResponse:
+    item = require_item(db, item_id)
+    content_type = upload.content_type or ""
+    if content_type not in IMAGE_CONTENT_TYPES:
+        raise bad_request("\u56fe\u7247\u683c\u5f0f\u4e0d\u652f\u6301")
+
+    active_image_exists = db.scalar(
+        select(ItemImage.id)
+        .where(ItemImage.item_id == item.id, ItemImage.is_archived.is_(False))
+        .limit(1)
+    ) is not None
+    file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="images")
+    stored_filename = file_path.rsplit("/", 1)[-1]
+    next_sort_order = (
+        db.scalar(select(func.max(ItemImage.sort_order)).where(ItemImage.item_id == item.id)) or 0
+    ) + 10
+    image = ItemImage(
+        item_id=item.id,
+        original_filename=upload.filename or "",
+        stored_filename=stored_filename,
+        file_path=file_path,
+        content_type=content_type,
+        byte_size=byte_size,
+        uploaded_by_id=actor_id,
+        is_primary=False,
+        sort_order=next_sort_order,
+    )
+    db.add(image)
+    flush_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    if is_primary or not active_image_exists:
+        set_primary_image(db, item.id, image.id)
+    item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    db.refresh(image)
+    return ItemImageResponse.model_validate({**image.__dict__, "url": image.file_path})
+
+
+async def add_item_attachment(
+    db: Session,
+    item_id: int,
+    upload: UploadFile,
+    actor_id: int | None = None,
+) -> ItemAttachmentResponse:
+    item = require_item(db, item_id)
+    content_type = upload.content_type or ""
+    file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="attachments")
+    stored_filename = file_path.rsplit("/", 1)[-1]
+    attachment = ItemAttachment(
+        item_id=item.id,
+        original_filename=upload.filename or "",
+        stored_filename=stored_filename,
+        file_path=file_path,
+        content_type=content_type,
+        byte_size=byte_size,
+        uploaded_by_id=actor_id,
+    )
+    db.add(attachment)
+    item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25")
+    db.refresh(attachment)
+    return ItemAttachmentResponse.model_validate({**attachment.__dict__, "download_url": attachment.file_path})
+
+
+def archive_item_image(
+    db: Session,
+    item_id: int,
+    image_id: int,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    image = db.get(ItemImage, image_id)
+    if image is None or image.item_id != item.id or image.is_archived:
+        raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
+    was_primary = image.is_primary
+    image.is_archived = True
+    image.is_primary = False
+    item.updated_by_id = actor_id
+    if was_primary:
+        flush_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+        replacement = first_active_image_row(db, item.id)
+        if replacement is not None:
+            set_primary_image(db, item.id, replacement.id)
+    commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    db.expire_all()
+    return get_item_detail(db, item_id)
+
+
+def archive_item_attachment(
+    db: Session,
+    item_id: int,
+    attachment_id: int,
+    actor_id: int | None = None,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    attachment = db.get(ItemAttachment, attachment_id)
+    if attachment is None or attachment.item_id != item.id or attachment.is_archived:
+        raise not_found("\u9644\u4ef6\u4e0d\u5b58\u5728")
+    attachment.is_archived = True
+    item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25")
+    db.expire_all()
     return get_item_detail(db, item_id)
 
 
@@ -1040,6 +1153,23 @@ def build_attribute_value_responses(item: Item) -> list[ItemAttributeValueRespon
             ),
         )
     ]
+
+
+def set_primary_image(db: Session, item_id: int, image_id: int) -> None:
+    images = db.scalars(
+        select(ItemImage).where(ItemImage.item_id == item_id, ItemImage.is_archived.is_(False))
+    ).all()
+    for image in images:
+        image.is_primary = image.id == image_id
+
+
+def first_active_image_row(db: Session, item_id: int) -> ItemImage | None:
+    return db.scalar(
+        select(ItemImage)
+        .where(ItemImage.item_id == item_id, ItemImage.is_archived.is_(False))
+        .order_by(ItemImage.sort_order, ItemImage.id)
+        .limit(1)
+    )
 
 
 def first_active_primary_image(item: Item):

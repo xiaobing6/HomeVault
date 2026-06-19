@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     access_token_minutes: int = 480
     admin_username: str = "admin"
     admin_password: str = "ChangeMe123!"
+    upload_dir: str = "uploads"
 
     model_config = SettingsConfigDict(
         env_file=".env",
