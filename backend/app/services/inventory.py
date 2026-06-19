@@ -180,6 +180,8 @@ def validate_basic_placement(
 ) -> PlacementTarget:
     if location_node_id is not None and container_item_id is not None:
         raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668\uff0c\u4e0d\u80fd\u540c\u65f6\u9009\u62e9\u4e24\u8005")
+    if status.semantic in EXIT_STATUS_SEMANTICS and (location_node_id is not None or container_item_id is not None):
+        raise bad_request("\u9000\u51fa\u72b6\u6001\u7684\u7269\u54c1\u4e0d\u80fd\u5206\u914d\u4f4d\u7f6e\u6216\u5bb9\u5668")
     if status.semantic not in EXIT_STATUS_SEMANTICS and location_node_id is None and container_item_id is None:
         raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668")
 
@@ -534,6 +536,8 @@ def move_item(
     if payload.location_node_id is None and payload.container_item_id is None:
         raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668")
     item_status = require_active_status(db, item.status_id)
+    if item_status.semantic in EXIT_STATUS_SEMANTICS:
+        raise bad_request("\u9000\u51fa\u72b6\u6001\u7684\u7269\u54c1\u4e0d\u80fd\u79fb\u52a8")
     placement = validate_basic_placement(
         db,
         item_status,
@@ -720,7 +724,9 @@ def return_loan(
         else find_active_status_by_code(db, "in_stock")
     )
     if target_status is None:
-        target_status = require_active_status(db, item.status_id)
+        raise bad_request("\u5728\u5e93\u72b6\u6001\u4e0d\u5b58\u5728")
+    if target_status.code == "loaned" or target_status.semantic in {"away", "loaned"}:
+        raise bad_request("\u5f52\u8fd8\u540e\u72b6\u6001\u4e0d\u80fd\u4e3a\u501f\u51fa")
     placement = validate_basic_placement(
         db,
         target_status,

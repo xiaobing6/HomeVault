@@ -178,3 +178,25 @@ def test_item_location_and_container_are_mutually_exclusive(db_session: Session)
 
     with pytest.raises(IntegrityError):
         db_session.commit()
+
+
+def test_item_loans_reject_duplicate_active_loan_for_same_item(db_session: Session) -> None:
+    from app.models.inventory import Item, ItemLoan
+
+    home = HomeSpace(name="Home")
+    residence = Residence(name="Main residence", home_space=home)
+    location = LocationNode(residence=residence, name="Closet", node_type="cabinet")
+    category = Category(code="documents", name="Documents")
+    status = ItemStatus(code="in_stock", name="In stock", semantic="in_inventory", is_system=True)
+    item = Item(
+        name="Passport",
+        category=category,
+        status=status,
+        location_node=location,
+    )
+    item.loans.append(ItemLoan(borrower_name="Taylor"))
+    item.loans.append(ItemLoan(borrower_name="Jordan"))
+    db_session.add(item)
+
+    with pytest.raises(IntegrityError):
+        db_session.commit()

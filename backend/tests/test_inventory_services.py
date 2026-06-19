@@ -524,6 +524,23 @@ def test_move_item_rejects_container_nesting_over_max_depth(
     assert exc_info.value.status_code == 400
 
 
+def test_move_item_rejects_item_already_in_exit_status(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+    change_item_status(
+        db_session,
+        item.id,
+        ChangeStatusRequest(status_id=inventory_seed["removed"].id, reason="Disposed"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        move_item(db_session, item.id, MoveItemRequest(location_node_id=inventory_seed["closet"].id))
+
+    assert exc_info.value.status_code == 400
+
+
 def test_change_item_status_writes_movement_and_exit_status_clears_placement(
     db_session: Session,
     inventory_seed: dict[str, object],
@@ -676,3 +693,65 @@ def test_return_loan_sets_returned_at_updates_placement_status_and_writes_moveme
     assert movement.new_location_node_id == inventory_seed["closet"].id
     assert movement.note == "Back on shelf"
     assert movement.actor_id == 42
+
+
+def test_return_loan_rejects_exit_status_with_placement(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+    loaned = create_loan(db_session, item.id, LoanCreate(borrower_name="Taylor"), actor_id=7)
+
+    with pytest.raises(HTTPException) as exc_info:
+        return_loan(
+            db_session,
+            item.id,
+            loaned.loans[0].id,
+            LoanReturn(
+                location_node_id=inventory_seed["closet"].id,
+                target_status_id=inventory_seed["removed"].id,
+            ),
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_return_loan_rejects_loaned_target_status(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+    loaned = create_loan(db_session, item.id, LoanCreate(borrower_name="Taylor"), actor_id=7)
+
+    with pytest.raises(HTTPException) as exc_info:
+        return_loan(
+            db_session,
+            item.id,
+            loaned.loans[0].id,
+            LoanReturn(
+                location_node_id=inventory_seed["closet"].id,
+                target_status_id=inventory_seed["loaned"].id,
+            ),
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_return_loan_without_target_status_requires_active_in_stock_status(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+    loaned = create_loan(db_session, item.id, LoanCreate(borrower_name="Taylor"), actor_id=7)
+    inventory_seed["in_stock"].is_active = False
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        return_loan(
+            db_session,
+            item.id,
+            loaned.loans[0].id,
+            LoanReturn(location_node_id=inventory_seed["closet"].id),
+        )
+
+    assert exc_info.value.status_code == 400

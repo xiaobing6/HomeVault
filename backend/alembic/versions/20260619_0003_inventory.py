@@ -216,9 +216,18 @@ def upgrade() -> None:
     )
     op.create_index("ix_item_loans_id", "item_loans", ["id"])
     op.create_index("ix_item_loans_item_id", "item_loans", ["item_id"])
+    op.create_index(
+        "uq_item_loans_active_item_id",
+        "item_loans",
+        ["item_id"],
+        unique=True,
+        sqlite_where=sa.text("returned_at IS NULL"),
+        postgresql_where=sa.text("returned_at IS NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("uq_item_loans_active_item_id", table_name="item_loans")
     op.drop_index("ix_item_loans_item_id", table_name="item_loans")
     op.drop_index("ix_item_loans_id", table_name="item_loans")
     op.drop_table("item_loans")

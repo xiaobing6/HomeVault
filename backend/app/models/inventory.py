@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -351,6 +352,15 @@ class ItemLoan(Base):
         default=utcnow,
         onupdate=utcnow,
         nullable=False,
+    )
+    __table_args__ = (
+        Index(
+            "uq_item_loans_active_item_id",
+            "item_id",
+            unique=True,
+            sqlite_where=returned_at.is_(None),
+            postgresql_where=returned_at.is_(None),
+        ),
     )
 
     item: Mapped[Item] = relationship(
