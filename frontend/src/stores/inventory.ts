@@ -49,6 +49,23 @@ const defaultFilters = (): ItemFilters => ({
   include_archived: false
 })
 
+const paginationFilterKeys = new Set<keyof ItemFilters>(['page', 'page_size'])
+
+function hasNonPaginationFilter(filters: ItemFilters): boolean {
+  return (Object.keys(filters) as (keyof ItemFilters)[]).some((key) => !paginationFilterKeys.has(key))
+}
+
+function isItemDetail(value: unknown): value is ItemDetail {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id' in value &&
+    'attribute_values' in value &&
+    'images' in value &&
+    'attachments' in value
+  )
+}
+
 export const useInventoryStore = defineStore('inventory', {
   state: (): InventoryState => ({
     items: [],
@@ -128,10 +145,28 @@ export const useInventoryStore = defineStore('inventory', {
       this.selectedItem = null
     },
     setFilters(filters: ItemFilters) {
-      this.filters = { ...this.filters, ...filters }
+      this.filters = {
+        ...this.filters,
+        ...filters,
+        page: hasNonPaginationFilter(filters) ? 1 : filters.page ?? this.filters.page
+      }
+    },
+    applyFilters(filters: ItemFilters) {
+      this.filters = { ...this.filters, ...filters, page: 1 }
+    },
+    setPage(page: number) {
+      this.filters = { ...this.filters, page }
+      this.page = page
+    },
+    setPageSize(pageSize: number) {
+      this.filters = { ...this.filters, page: 1, page_size: pageSize }
+      this.page = 1
+      this.pageSize = pageSize
     },
     resetFilters() {
       this.filters = defaultFilters()
+      this.page = 1
+      this.pageSize = this.filters.page_size ?? 20
     },
     async refreshSelectedItem() {
       if (this.selectedItem) {
@@ -142,8 +177,19 @@ export const useInventoryStore = defineStore('inventory', {
       this.saving = true
       try {
         const result = await operation()
-        await this.loadItems()
-        await this.refreshSelectedItem()
+        if (isItemDetail(result)) {
+          this.selectedItem = result
+        }
+        try {
+          await this.loadItems()
+        } catch {
+          // A successful mutation should not be reported as failed because a follow-up refresh failed.
+        }
+        try {
+          await this.refreshSelectedItem()
+        } catch {
+          // Keep the mutation result as the source of truth until the next successful detail refresh.
+        }
         return result
       } finally {
         this.saving = false
