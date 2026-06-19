@@ -10,7 +10,11 @@ class ResponseModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PlacementPayload(BaseModel):
+class RequestModel(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class PlacementPayload(RequestModel):
     location_node_id: int | None = None
     container_item_id: int | None = None
 
@@ -21,7 +25,7 @@ class PlacementPayload(BaseModel):
         return self
 
 
-class ItemAttributeValueInput(BaseModel):
+class ItemAttributeValueInput(RequestModel):
     attribute_definition_id: int
     value: str = ""
 
@@ -41,12 +45,10 @@ class ItemCreate(PlacementPayload):
     tags: list[str] = Field(default_factory=list)
 
 
-class ItemUpdate(PlacementPayload):
+class ItemUpdate(RequestModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     description: str | None = None
     category_id: int | None = None
-    status_id: int | None = None
-    quantity: Decimal | None = None
     unit: str | None = None
     owner_member_id: int | None = None
     keeper_member_id: int | None = None
@@ -56,7 +58,7 @@ class ItemUpdate(PlacementPayload):
     tags: list[str] | None = None
 
 
-class ItemListQuery(BaseModel):
+class ItemListQuery(RequestModel):
     search: str | None = None
     category_id: int | None = None
     residence_id: int | None = None
@@ -220,13 +222,13 @@ class MoveItemRequest(PlacementPayload):
     note: str = ""
 
 
-class ChangeStatusRequest(BaseModel):
+class ChangeStatusRequest(RequestModel):
     status_id: int
     reason: str = Field(default="", max_length=255)
     note: str = ""
 
 
-class QuantityAdjustmentCreate(BaseModel):
+class QuantityAdjustmentCreate(RequestModel):
     new_quantity: Decimal | None = None
     delta: Decimal | None = None
     reason: str = Field(min_length=1, max_length=255)
@@ -241,7 +243,7 @@ class QuantityAdjustmentCreate(BaseModel):
         return self
 
 
-class LoanCreate(BaseModel):
+class LoanCreate(RequestModel):
     borrower_name: str = Field(min_length=1, max_length=160)
     borrower_contact: str = Field(default="", max_length=160)
     expected_return_date: date | None = None
@@ -253,7 +255,7 @@ class LoanReturn(PlacementPayload):
     target_status_id: int | None = None
 
 
-class ArchiveItemRequest(BaseModel):
+class ArchiveItemRequest(RequestModel):
     archive_reason: str = Field(default="", max_length=255)
 
 

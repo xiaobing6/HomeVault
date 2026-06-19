@@ -6,7 +6,15 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.inventory import ItemCreate, ItemDetailResponse, ItemListQuery
+from app.schemas.inventory import (
+    ItemCreate,
+    ItemDetailResponse,
+    ItemListQuery,
+    ItemUpdate,
+    LoanCreate,
+    PlacementPayload,
+    QuantityAdjustmentCreate,
+)
 
 
 def test_item_create_requires_name_and_category() -> None:
@@ -19,6 +27,41 @@ def test_item_create_requires_name_and_category() -> None:
 
 def test_item_list_query_defaults_hide_archived_items() -> None:
     assert ItemListQuery().include_archived is False
+
+
+def test_item_update_excludes_dedicated_lifecycle_fields() -> None:
+    forbidden_fields = {"location_node_id", "container_item_id", "status_id", "quantity"}
+
+    assert forbidden_fields.isdisjoint(ItemUpdate.model_fields)
+
+
+@pytest.mark.parametrize(
+    ("model_type", "payload"),
+    [
+        (ItemCreate, {"name": "   ", "category_id": 1, "status_id": 1}),
+        (QuantityAdjustmentCreate, {"delta": Decimal("1"), "reason": "   "}),
+        (LoanCreate, {"borrower_name": "   "}),
+    ],
+)
+def test_required_request_strings_reject_whitespace_only(
+    model_type: type[ItemCreate] | type[QuantityAdjustmentCreate] | type[LoanCreate],
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        model_type(**payload)
+
+
+def test_placement_payload_rejects_location_and_container_together() -> None:
+    with pytest.raises(ValidationError):
+        PlacementPayload(location_node_id=1, container_item_id=2)
+
+
+def test_quantity_adjustment_requires_exactly_one_quantity_target() -> None:
+    with pytest.raises(ValidationError):
+        QuantityAdjustmentCreate(reason="inventory count")
+
+    with pytest.raises(ValidationError):
+        QuantityAdjustmentCreate(new_quantity=Decimal("2"), delta=Decimal("1"), reason="inventory count")
 
 
 def test_item_detail_response_serializes_nested_inventory_payload() -> None:
