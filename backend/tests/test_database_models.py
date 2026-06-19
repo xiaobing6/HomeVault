@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,6 +37,28 @@ EXPECTED_CONFIGURATION_TABLES = {
     "dictionary_groups",
     "dictionary_options",
 }
+
+
+def alembic_config(db_path: str) -> Config:
+    backend_dir = Path(__file__).resolve().parents[1]
+    database_url = f"sqlite:///{Path(db_path).resolve().as_posix()}"
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    config.attributes["previous_database_url"] = os.environ.get("HOMEVAULT_DATABASE_URL")
+    config.attributes["had_previous_database_url"] = "HOMEVAULT_DATABASE_URL" in os.environ
+    os.environ["HOMEVAULT_DATABASE_URL"] = database_url
+    get_settings.cache_clear()
+    return config
+
+
+def restore_alembic_database_url(config: Config) -> None:
+    previous_database_url = config.attributes["previous_database_url"]
+    if config.attributes["had_previous_database_url"]:
+        os.environ["HOMEVAULT_DATABASE_URL"] = previous_database_url
+    else:
+        os.environ.pop("HOMEVAULT_DATABASE_URL", None)
+    get_settings.cache_clear()
 
 
 def session_expiry() -> datetime:
@@ -161,3 +184,29 @@ def test_configuration_migration_upgrade_and_downgrade_temp_sqlite(monkeypatch, 
         assert EXPECTED_CONFIGURATION_TABLES.isdisjoint(downgraded_tables)
     finally:
         get_settings.cache_clear()
+
+
+def test_inventory_migration_upgrade_and_downgrade_temp_sqlite(tmp_path: Path) -> None:
+    db_path = tmp_path / "inventory.sqlite3"
+    cfg = alembic_config(str(db_path))
+
+    try:
+        command.upgrade(cfg, "20260619_0003")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        inspector = inspect(engine)
+        assert "items" in inspector.get_table_names()
+        assert "item_attribute_values" in inspector.get_table_names()
+        assert "item_images" in inspector.get_table_names()
+        assert "item_attachments" in inspector.get_table_names()
+        assert "tags" in inspector.get_table_names()
+        assert "item_tags" in inspector.get_table_names()
+        assert "item_movements" in inspector.get_table_names()
+        assert "item_quantity_changes" in inspector.get_table_names()
+        assert "item_loans" in inspector.get_table_names()
+
+        command.downgrade(cfg, "20260619_0002")
+        inspector = inspect(engine)
+        assert "items" not in inspector.get_table_names()
+    finally:
+        restore_alembic_database_url(cfg)

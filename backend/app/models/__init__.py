@@ -11,6 +11,17 @@ from app.models.configuration import (
     LocationNode,
     Residence,
 )
+from app.models.inventory import (
+    Item,
+    ItemAttachment,
+    ItemAttributeValue,
+    ItemImage,
+    ItemLoan,
+    ItemMovement,
+    ItemQuantityChange,
+    ItemTag,
+    Tag,
+)
 
 __all__ = [
     "AttributeDefinition",
@@ -22,10 +33,19 @@ __all__ = [
     "ExternalIdentity",
     "FamilyMember",
     "HomeSpace",
+    "Item",
+    "ItemAttachment",
+    "ItemAttributeValue",
+    "ItemImage",
+    "ItemLoan",
+    "ItemMovement",
+    "ItemQuantityChange",
     "ItemStatus",
+    "ItemTag",
     "LocationNode",
     "Permission",
     "Residence",
     "Role",
+    "Tag",
     "User",
 ]
