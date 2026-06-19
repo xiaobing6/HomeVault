@@ -41,7 +41,7 @@ async function handleLogout() {
           <span>仪表盘</span>
         </el-menu-item>
         <PermissionGate permission="items:view">
-          <el-menu-item index="/">
+          <el-menu-item index="/items">
             <el-icon><House /></el-icon>
             <span>物品</span>
           </el-menu-item>
