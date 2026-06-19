@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
 from app.models.auth import Permission, Role, User
+from app.services.configuration import ensure_core_configuration_seed
 
 PERMISSIONS = [
     ("items:view", "查看物品", "查看物品列表和详情"),
@@ -57,4 +58,5 @@ def seed_auth_baseline(db: Session, admin_username: str, admin_password: str) ->
     admin.roles = [roles_by_code["admin"]]
     db.commit()
     db.refresh(admin)
+    ensure_core_configuration_seed(db)
     return admin

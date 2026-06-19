@@ -145,6 +145,43 @@ def list_residences(db: Session) -> list[Residence]:
     )
 
 
+def list_location_tree(db: Session) -> list[LocationNodeResponse]:
+    nodes = db.scalars(
+        select(LocationNode).order_by(LocationNode.sort_order, LocationNode.id)
+    ).all()
+    return build_location_tree(list(nodes))
+
+
+def list_family_members(db: Session) -> list[FamilyMemberResponse]:
+    members = db.scalars(
+        select(FamilyMember).order_by(FamilyMember.id)
+    ).all()
+    return [FamilyMemberResponse.model_validate(member) for member in members]
+
+
+def list_category_tree(db: Session) -> list[CategoryResponse]:
+    categories = db.scalars(
+        select(Category).order_by(Category.sort_order, Category.name, Category.id)
+    ).all()
+    return build_category_tree(list(categories))
+
+
+def list_item_statuses(db: Session) -> list[ItemStatusResponse]:
+    statuses = db.scalars(
+        select(ItemStatus).order_by(ItemStatus.sort_order, ItemStatus.id)
+    ).all()
+    return [ItemStatusResponse.model_validate(status) for status in statuses]
+
+
+def list_dictionary_groups(db: Session) -> list[DictionaryGroupResponse]:
+    groups = db.scalars(
+        select(DictionaryGroup)
+        .options(selectinload(DictionaryGroup.options))
+        .order_by(DictionaryGroup.code)
+    ).all()
+    return [DictionaryGroupResponse.model_validate(group) for group in groups]
+
+
 def build_location_tree(nodes: list[LocationNode]) -> list[LocationNodeResponse]:
     children_by_parent: dict[int | None, list[LocationNode]] = {}
     node_ids = {node.id for node in nodes}
