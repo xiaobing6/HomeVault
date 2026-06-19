@@ -88,6 +88,14 @@ def commit_or_bad_request(db: Session, message: str) -> None:
         raise bad_request(message) from exc
 
 
+def flush_or_bad_request(db: Session, message: str) -> None:
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise bad_request(message) from exc
+
+
 def require_active_category(db: Session, category_id: int) -> Category:
     category = db.get(Category, category_id)
     if category is None or not category.is_active:
@@ -368,7 +376,7 @@ def create_item(db: Session, payload: ItemCreate, actor_id: int | None = None) -
         updated_by_id=actor_id,
     )
     db.add(item)
-    db.flush()
+    flush_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
     replace_attribute_values(db, item, attribute_values)
     replace_tags(db, item, payload.tags)
     db.add(
@@ -504,15 +512,11 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
                     Item.attribute_values.any(ItemAttributeValue.value.ilike(search_term)),
                 )
             )
+    on_loan_predicate = item_on_loan_predicate()
     if query.is_on_loan is True:
-        stmt = stmt.where(
-            or_(
-                Item.status.has(ItemStatus.code == "loaned"),
-                Item.loans.any(ItemLoan.returned_at.is_(None)),
-            )
-        )
+        stmt = stmt.where(on_loan_predicate)
     elif query.is_on_loan is False:
-        stmt = stmt.where(~Item.status.has(ItemStatus.code == "loaned"))
+        stmt = stmt.where(~on_loan_predicate)
 
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
     stmt = (
@@ -539,7 +543,7 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
 
 def replace_attribute_values(db: Session, item: Item, values: dict[int, str]) -> None:
     item.attribute_values.clear()
-    db.flush()
+    flush_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
     for definition_id, value in sorted(values.items()):
         if value == "":
             continue
@@ -603,9 +607,16 @@ def replace_tags(db: Session, item: Item, tag_names: list[str]) -> None:
         tags.append(tag)
 
     item.tag_links.clear()
-    db.flush()
+    flush_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
     for tag in tags:
         item.tag_links.append(ItemTag(tag=tag))
+
+
+def item_on_loan_predicate():
+    return or_(
+        Item.status.has(ItemStatus.code == "loaned"),
+        Item.loans.any(ItemLoan.returned_at.is_(None)),
+    )
 
 
 def item_response_options() -> tuple:

@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,7 +19,7 @@ from app.models.configuration import (
     LocationNode,
     Residence,
 )
-from app.models.inventory import Item, ItemQuantityChange, Tag
+from app.models.inventory import Item, ItemLoan, ItemQuantityChange, Tag
 from app.schemas.inventory import ItemCreate, ItemListQuery, ItemUpdate
 from app.services.inventory import archive_item, create_item, get_item_detail, list_items, update_item
 
@@ -310,6 +311,41 @@ def test_list_items_filters_by_container_placement(
 
     assert [item.name for item in placed_in_container.items] == ["Birth certificate"]
     assert placed_in_container.total == 1
+
+
+def test_list_items_on_loan_false_excludes_active_loan_even_when_status_is_in_stock(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    created = create_item(db_session, make_create_payload(inventory_seed, name="Borrowed passport"))
+    db_session.add(ItemLoan(item_id=created.id, borrower_name="Taylor"))
+    db_session.commit()
+
+    on_loan = list_items(db_session, ItemListQuery(is_on_loan=True))
+    not_on_loan = list_items(db_session, ItemListQuery(is_on_loan=False))
+
+    assert [item.name for item in on_loan.items] == ["Borrowed passport"]
+    assert [item.name for item in not_on_loan.items] == []
+
+
+def test_create_item_rolls_back_and_returns_bad_request_when_flush_raises_integrity_error(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_flush = db_session.flush
+
+    def fail_once(*args: object, **kwargs: object) -> object:
+        monkeypatch.setattr(db_session, "flush", original_flush)
+        raise IntegrityError("insert items", {}, Exception("forced flush failure"))
+
+    monkeypatch.setattr(db_session, "flush", fail_once)
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_item(db_session, make_create_payload(inventory_seed, name="Broken item"))
+
+    assert exc_info.value.status_code == 400
+    assert db_session.scalar(select(Item).where(Item.name == "Broken item")) is None
 
 
 def test_item_detail_includes_tags_custom_values_and_paths(
