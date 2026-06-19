@@ -1,23 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 
 import { getChineseErrorMessage } from '../api/client'
+import type { ItemDetail, ItemLoan } from '../api/inventory'
+import ItemActionDialogs from '../components/items/ItemActionDialogs.vue'
 import ItemCardGrid from '../components/items/ItemCardGrid.vue'
+import ItemDetailModal from '../components/items/ItemDetailModal.vue'
 import ItemFilterPanel from '../components/items/ItemFilterPanel.vue'
+import ItemFormDrawer from '../components/items/ItemFormDrawer.vue'
 import ItemTable from '../components/items/ItemTable.vue'
 import ItemToolbar from '../components/items/ItemToolbar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useConfigurationStore } from '../stores/configuration'
 import { useInventoryStore } from '../stores/inventory'
 
+type ItemActionType = 'move' | 'status' | 'borrow' | 'return' | 'quantity' | 'archive'
+
 const auth = useAuthStore()
 const configuration = useConfigurationStore()
 const inventory = useInventoryStore()
-const { items, loading, total, page, pageSize, viewMode } = storeToRefs(inventory)
+const { items, loading, selectedItem, total, page, pageSize, viewMode } = storeToRefs(inventory)
 
 const canCreate = computed(() => auth.hasPermission('items:create'))
+const canEdit = computed(() => auth.hasPermission('items:edit'))
+const canArchive = computed(() => auth.hasPermission('items:archive'))
+const detailOpen = ref(false)
+const formOpen = ref(false)
+const editingItem = ref<ItemDetail | null>(null)
+const actionOpen = ref(false)
+const currentAction = ref<ItemActionType | null>(null)
+const returnLoan = ref<ItemLoan | null>(null)
 const searchValue = computed({
   get: () => inventory.filters.search ?? '',
   set: (value: string) => {
@@ -71,16 +85,55 @@ async function changePageSize(nextSize: number) {
 }
 
 async function openDetail(itemId: number) {
-  ElMessage.info('详情弹窗将在下一步上线，已为你预取物品详情')
   try {
     await inventory.openDetail(itemId)
+    detailOpen.value = true
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }
 }
 
-function openCreatePlaceholder() {
-  ElMessage.info('新增物品表单将在下一步上线')
+function openCreateDrawer() {
+  if (!canCreate.value) return
+  editingItem.value = null
+  formOpen.value = true
+}
+
+function openEditDrawer() {
+  if (!selectedItem.value || !canEdit.value) return
+  editingItem.value = selectedItem.value
+  formOpen.value = true
+}
+
+function openActionDialog(action: ItemActionType, loan?: ItemLoan) {
+  if (!selectedItem.value) return
+  currentAction.value = action
+  returnLoan.value = loan ?? null
+  actionOpen.value = true
+}
+
+async function refreshListAndDetail(itemId: number) {
+  try {
+    await inventory.loadItems()
+    await inventory.openDetail(itemId)
+    detailOpen.value = true
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  }
+}
+
+async function handleFormSaved(detail: ItemDetail) {
+  editingItem.value = null
+  await refreshListAndDetail(detail.id)
+}
+
+async function handleActionSuccess(detail: ItemDetail) {
+  await refreshListAndDetail(detail.id)
+}
+
+function closeDetail() {
+  detailOpen.value = false
+  inventory.closeDetail()
 }
 </script>
 
@@ -98,7 +151,7 @@ function openCreatePlaceholder() {
           v-model:sort="sortValue"
           :can-create="canCreate"
           @search="refreshSearch"
-          @add-item="openCreatePlaceholder"
+          @add-item="openCreateDrawer"
         />
 
         <ItemCardGrid
@@ -122,6 +175,36 @@ function openCreatePlaceholder() {
         </div>
       </div>
     </div>
+
+    <ItemFormDrawer
+      v-model="formOpen"
+      :item="editingItem"
+      @saved="handleFormSaved"
+    />
+
+    <ItemDetailModal
+      v-model="detailOpen"
+      :item="selectedItem"
+      :loading="loading"
+      :can-edit="canEdit"
+      :can-archive="canArchive"
+      @edit="openEditDrawer"
+      @move="openActionDialog('move')"
+      @status="openActionDialog('status')"
+      @borrow="openActionDialog('borrow')"
+      @return="(loan) => openActionDialog('return', loan)"
+      @quantity="openActionDialog('quantity')"
+      @archive="openActionDialog('archive')"
+      @close="closeDetail"
+    />
+
+    <ItemActionDialogs
+      v-model="actionOpen"
+      :action="currentAction"
+      :item="selectedItem"
+      :return-loan="returnLoan"
+      @success="handleActionSuccess"
+    />
   </section>
 </template>
 
