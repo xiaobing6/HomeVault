@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { Grid, List, Plus, Search } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -37,9 +37,23 @@ watch(
 
 watch(localSearch, (value) => {
   emit('update:search', value)
-  window.clearTimeout(searchTimer)
+  clearPendingSearch()
   searchTimer = window.setTimeout(() => emit('search'), 350)
+}, { flush: 'sync' })
+
+onUnmounted(() => {
+  clearPendingSearch()
 })
+
+function clearPendingSearch() {
+  window.clearTimeout(searchTimer)
+  searchTimer = undefined
+}
+
+function submitSearchNow() {
+  clearPendingSearch()
+  emit('search')
+}
 </script>
 
 <template>
@@ -50,8 +64,8 @@ watch(localSearch, (value) => {
       :prefix-icon="Search"
       placeholder="搜索物品"
       clearable
-      @keyup.enter="emit('search')"
-      @clear="emit('search')"
+      @keyup.enter="submitSearchNow"
+      @clear="submitSearchNow"
     />
 
     <div class="toolbar-actions">

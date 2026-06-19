@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 
@@ -16,9 +16,6 @@ const auth = useAuthStore()
 const configuration = useConfigurationStore()
 const inventory = useInventoryStore()
 const { items, loading, total, page, pageSize, viewMode } = storeToRefs(inventory)
-
-const createPlaceholderOpen = ref(false)
-const detailPlaceholderId = ref<number | null>(null)
 
 const canCreate = computed(() => auth.hasPermission('items:create'))
 const searchValue = computed({
@@ -74,7 +71,7 @@ async function changePageSize(nextSize: number) {
 }
 
 async function openDetail(itemId: number) {
-  detailPlaceholderId.value = itemId
+  ElMessage.info('详情弹窗将在下一步上线，已为你预取物品详情')
   try {
     await inventory.openDetail(itemId)
   } catch (error) {
@@ -83,7 +80,7 @@ async function openDetail(itemId: number) {
 }
 
 function openCreatePlaceholder() {
-  createPlaceholderOpen.value = true
+  ElMessage.info('新增物品表单将在下一步上线')
 }
 </script>
 

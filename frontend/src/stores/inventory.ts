@@ -66,6 +66,8 @@ function isItemDetail(value: unknown): value is ItemDetail {
   )
 }
 
+let loadItemsRequestId = 0
+
 export const useInventoryStore = defineStore('inventory', {
   state: (): InventoryState => ({
     items: [],
@@ -83,15 +85,21 @@ export const useInventoryStore = defineStore('inventory', {
       if (filters) {
         this.setFilters(filters)
       }
+      const requestId = ++loadItemsRequestId
       this.loading = true
       try {
         const response = await listItemsApi(this.filters)
+        if (requestId !== loadItemsRequestId) return
         this.items = response.items
         this.total = response.total
         this.page = response.page
         this.pageSize = response.page_size
+      } catch (error) {
+        if (requestId === loadItemsRequestId) throw error
       } finally {
-        this.loading = false
+        if (requestId === loadItemsRequestId) {
+          this.loading = false
+        }
       }
     },
     async openDetail(itemId: number) {
