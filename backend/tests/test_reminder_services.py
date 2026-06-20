@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -12,6 +12,7 @@ from app.models.configuration import Category, HomeSpace, ItemStatus, LocationNo
 from app.models.inventory import Item, ItemLoan
 from app.models.reminders import Reminder
 from app.schemas.reminders import ReminderCreate, ReminderListQuery, ReminderUpdate
+from app.services import reminders as reminder_service
 from app.services.reminders import (
     archive_reminder,
     complete_reminder,
@@ -22,6 +23,18 @@ from app.services.reminders import (
     reopen_reminder,
     update_reminder,
 )
+
+
+def test_server_today_uses_utc_date(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz is timezone.utc
+            return cls(2099, 1, 2, 3, 4, tzinfo=tz)
+
+    monkeypatch.setattr(reminder_service, "datetime", FixedDateTime)
+
+    assert reminder_service.server_today() == date(2099, 1, 2)
 
 
 @pytest.fixture()
@@ -95,3 +108,70 @@ def test_create_rejects_archived_item(db_session: Session, reminder_seed: dict[s
         create_reminder(db_session, ReminderCreate(title="Nope", item_id=item.id), actor_id=10)
 
     assert exc_info.value.status_code == 400
+
+
+def test_complete_reminder_preserves_first_completion_metadata(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = reminder_seed["item"]
+    detail = create_reminder(db_session, ReminderCreate(title="Check passport", item_id=item.id), actor_id=10)
+    first_now = datetime(2026, 6, 20, 1, 0)
+    second_now = datetime(2026, 6, 20, 2, 0)
+    clock = iter([first_now, second_now])
+    monkeypatch.setattr(reminder_service, "utcnow", lambda: next(clock))
+
+    complete_reminder(db_session, detail.id, actor_id=10)
+    complete_reminder(db_session, detail.id, actor_id=None)
+    db_session.expire_all()
+    saved = db_session.get(Reminder, detail.id)
+
+    assert saved is not None
+    assert saved.status == "done"
+    assert saved.completed_at == first_now
+    assert saved.completed_by_user_id == 10
+
+
+def test_dismiss_reminder_preserves_first_dismissal_metadata(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = reminder_seed["item"]
+    detail = create_reminder(db_session, ReminderCreate(title="Check passport", item_id=item.id), actor_id=10)
+    first_now = datetime(2026, 6, 20, 1, 0)
+    second_now = datetime(2026, 6, 20, 2, 0)
+    clock = iter([first_now, second_now])
+    monkeypatch.setattr(reminder_service, "utcnow", lambda: next(clock))
+
+    dismiss_reminder(db_session, detail.id, actor_id=10)
+    dismiss_reminder(db_session, detail.id, actor_id=None)
+    db_session.expire_all()
+    saved = db_session.get(Reminder, detail.id)
+
+    assert saved is not None
+    assert saved.status == "dismissed"
+    assert saved.dismissed_at == first_now
+    assert saved.dismissed_by_user_id == 10
+
+
+def test_archive_reminder_preserves_first_archive_timestamp(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = reminder_seed["item"]
+    detail = create_reminder(db_session, ReminderCreate(title="Check passport", item_id=item.id), actor_id=10)
+    first_now = datetime(2026, 6, 20, 1, 0)
+    second_now = datetime(2026, 6, 20, 2, 0)
+    clock = iter([first_now, second_now])
+    monkeypatch.setattr(reminder_service, "utcnow", lambda: next(clock))
+
+    archive_reminder(db_session, detail.id)
+    archive_reminder(db_session, detail.id)
+    db_session.expire_all()
+    saved = db_session.get(Reminder, detail.id)
+
+    assert saved is not None
+    assert saved.archived_at == first_now

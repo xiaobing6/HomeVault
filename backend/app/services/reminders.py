@@ -44,7 +44,7 @@ def utcnow() -> datetime:
 
 
 def server_today() -> date:
-    return date.today()
+    return datetime.now(timezone.utc).date()
 
 
 def commit_or_bad_request(db: Session, message: str) -> None:
@@ -240,11 +240,12 @@ def complete_reminder(
     actor_id: int | None = None,
 ) -> ReminderDetailResponse:
     reminder = require_editable_reminder(db, reminder_id)
-    reminder.status = REMINDER_STATUS_DONE
-    reminder.completed_at = utcnow()
-    reminder.completed_by_user_id = actor_id
-    reminder.dismissed_at = None
-    reminder.dismissed_by_user_id = None
+    if reminder.status != REMINDER_STATUS_DONE:
+        reminder.status = REMINDER_STATUS_DONE
+        reminder.completed_at = utcnow()
+        reminder.completed_by_user_id = actor_id
+        reminder.dismissed_at = None
+        reminder.dismissed_by_user_id = None
     commit_or_bad_request(db, "提醒保存失败")
     return get_reminder_detail(db, reminder.id)
 
@@ -255,11 +256,12 @@ def dismiss_reminder(
     actor_id: int | None = None,
 ) -> ReminderDetailResponse:
     reminder = require_editable_reminder(db, reminder_id)
-    reminder.status = REMINDER_STATUS_DISMISSED
-    reminder.dismissed_at = utcnow()
-    reminder.dismissed_by_user_id = actor_id
-    reminder.completed_at = None
-    reminder.completed_by_user_id = None
+    if reminder.status != REMINDER_STATUS_DISMISSED:
+        reminder.status = REMINDER_STATUS_DISMISSED
+        reminder.dismissed_at = utcnow()
+        reminder.dismissed_by_user_id = actor_id
+        reminder.completed_at = None
+        reminder.completed_by_user_id = None
     commit_or_bad_request(db, "提醒保存失败")
     return get_reminder_detail(db, reminder.id)
 
@@ -277,7 +279,8 @@ def reopen_reminder(db: Session, reminder_id: int) -> ReminderDetailResponse:
 
 def archive_reminder(db: Session, reminder_id: int) -> ReminderDetailResponse:
     reminder = require_reminder(db, reminder_id)
-    reminder.archived_at = utcnow()
+    if reminder.archived_at is None:
+        reminder.archived_at = utcnow()
     commit_or_bad_request(db, "提醒保存失败")
     return get_reminder_detail(db, reminder.id)
 
