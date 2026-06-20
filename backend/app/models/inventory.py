@@ -146,6 +146,11 @@ class Item(Base):
         foreign_keys="ItemLoan.item_id",
         lazy="selectin",
     )
+    reminders: Mapped[list[object]] = relationship(
+        "Reminder",
+        back_populates="item",
+        lazy="selectin",
+    )
 
 
 class ItemAttributeValue(Base):
@@ -392,5 +397,10 @@ class ItemLoan(Base):
     return_actor: Mapped[object | None] = relationship(
         "User",
         foreign_keys=[return_actor_id],
+        lazy="selectin",
+    )
+    reminders: Mapped[list[object]] = relationship(
+        "Reminder",
+        back_populates="loan",
         lazy="selectin",
     )

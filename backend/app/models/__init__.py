@@ -22,6 +22,7 @@ from app.models.inventory import (
     ItemTag,
     Tag,
 )
+from app.models.reminders import Reminder
 
 __all__ = [
     "AttributeDefinition",
@@ -44,6 +45,7 @@ __all__ = [
     "ItemTag",
     "LocationNode",
     "Permission",
+    "Reminder",
     "Residence",
     "Role",
     "Tag",
