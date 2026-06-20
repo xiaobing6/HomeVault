@@ -108,7 +108,7 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
         updated_by_id=9,
         created_at=now,
         updated_at=now,
-        primary_image_url="/uploads/items/box-1.jpg",
+        primary_image_url="/api/items/1/images/13/file",
         tags=[
             {
                 "id": 10,
@@ -133,7 +133,7 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
                 "item_id": 1,
                 "original_filename": "box.jpg",
                 "stored_filename": "box-1.jpg",
-                "file_path": "/uploads/items/box-1.jpg",
+                "file_path": "items/1/images/box-1.jpg",
                 "content_type": "image/jpeg",
                 "byte_size": 1200,
                 "is_primary": True,
@@ -141,7 +141,7 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
                 "is_archived": False,
                 "uploaded_by_id": 8,
                 "created_at": now,
-                "url": "/uploads/items/box-1.jpg",
+                "url": "/api/items/1/images/13/file",
             },
         ],
         attachments=[
@@ -150,13 +150,13 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
                 "item_id": 1,
                 "original_filename": "receipt.pdf",
                 "stored_filename": "receipt-1.pdf",
-                "file_path": "/uploads/items/receipt-1.pdf",
+                "file_path": "items/1/attachments/receipt-1.pdf",
                 "content_type": "application/pdf",
                 "byte_size": 2048,
                 "is_archived": False,
                 "uploaded_by_id": 8,
                 "created_at": now,
-                "download_url": "/uploads/items/receipt-1.pdf",
+                "download_url": "/api/items/1/attachments/14/download",
             },
         ],
         movements=[
@@ -222,8 +222,8 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
     serialized = response.model_dump(mode="json")
 
     assert serialized["quantity"] == "2.50"
-    assert serialized["images"][0]["url"] == "/uploads/items/box-1.jpg"
-    assert serialized["attachments"][0]["download_url"] == "/uploads/items/receipt-1.pdf"
+    assert serialized["images"][0]["url"] == "/api/items/1/images/13/file"
+    assert serialized["attachments"][0]["download_url"] == "/api/items/1/attachments/14/download"
     assert serialized["tags"][0]["name"] == "重要"
     assert serialized["attribute_values"][0]["attribute_key"] == "serial_number"
     assert serialized["movements"][0]["new_location_node_name"] == "主卧衣柜"

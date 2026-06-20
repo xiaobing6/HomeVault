@@ -136,8 +136,8 @@ def test_first_image_becomes_primary(
     assert image.is_primary is True
     assert [stored_image.is_primary for stored_image in detail.images] == [True]
     assert image.file_path.startswith("items/")
-    assert image.url == f"/uploads/{image.file_path}"
-    assert detail.primary_image_url == f"/uploads/{image.file_path}"
+    assert image.url == f"/api/items/{inventory_item.id}/images/{image.id}/file"
+    assert detail.primary_image_url == f"/api/items/{inventory_item.id}/images/{image.id}/file"
 
 
 def test_primary_image_replacement_keeps_single_primary(
@@ -165,7 +165,7 @@ def test_primary_image_replacement_keeps_single_primary(
 
     assert first.id != second.id
     assert [image.id for image in detail.images if image.is_primary] == [second.id]
-    assert detail.primary_image_url == f"/uploads/{second.file_path}"
+    assert detail.primary_image_url == f"/api/items/{inventory_item.id}/images/{second.id}/file"
 
 
 def test_image_upload_cleans_up_file_when_db_flush_fails(
@@ -321,7 +321,7 @@ def test_archive_image_and_attachment_hide_media_from_detail(
         inventory.add_item_attachment(
             db_session,
             inventory_item.id,
-            make_upload("manual.pdf", b"manual", "application/pdf"),
+            make_upload("manual.pdf", b"%PDF-1.7\nmanual", "application/pdf"),
             actor_id=42,
         )
     )
@@ -342,13 +342,28 @@ def test_archive_image_and_attachment_hide_media_from_detail(
     assert attachment_row is not None and attachment_row.is_archived is True
 
 
-def test_create_app_mounts_uploads(upload_dir: Path) -> None:
+def test_attachment_upload_rejects_spoofed_pdf_without_writing(
+    db_session: Session,
+    inventory_item: Item,
+    upload_dir: Path,
+) -> None:
+    upload = make_upload("manual.pdf", b"not a pdf", "application/pdf")
+
+    with pytest.raises(HTTPException) as exc_info:
+        run(inventory.add_item_attachment(db_session, inventory_item.id, upload))
+
+    assert exc_info.value.status_code == 400
+    assert db_session.scalars(select(ItemAttachment)).all() == []
+    assert [path for path in upload_dir.rglob("*") if path.is_file()] == []
+
+
+def test_create_app_does_not_mount_public_uploads(upload_dir: Path) -> None:
     app = create_app()
 
-    assert any(getattr(route, "path", None) == "/uploads" for route in app.routes)
+    assert all(getattr(route, "path", None) != "/uploads" for route in app.routes)
 
 
-def test_create_app_creates_missing_upload_dir_and_serves_file(
+def test_create_app_creates_missing_upload_dir_without_serving_public_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -364,5 +379,4 @@ def test_create_app_creates_missing_upload_dir_and_serves_file(
 
     response = TestClient(app).get("/uploads/items/1/images/front.png")
 
-    assert response.status_code == 200
-    assert response.content == PNG_BYTES
+    assert response.status_code == 404

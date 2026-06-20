@@ -12,7 +12,6 @@ from app.core.errors import bad_request
 IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
-UPLOAD_URL_PREFIX = "/uploads"
 
 SAFE_EXTENSIONS = {
     ".jpg",
@@ -57,10 +56,12 @@ def delete_stored_upload(relative_path: str) -> None:
         pass
 
 
-def public_upload_url(relative_path: str | None) -> str | None:
-    if relative_path is None:
-        return None
-    return f"{UPLOAD_URL_PREFIX}/{relative_path.lstrip('/')}"
+def protected_image_url(item_id: int, image_id: int) -> str:
+    return f"/api/items/{item_id}/images/{image_id}/file"
+
+
+def protected_attachment_download_url(item_id: int, attachment_id: int) -> str:
+    return f"/api/items/{item_id}/attachments/{attachment_id}/download"
 
 
 async def validate_image_signature(upload: UploadFile, content_type: str) -> None:
@@ -80,6 +81,37 @@ def validate_attachment_metadata(filename: str | None, content_type: str) -> Non
     allowed_content_types = ATTACHMENT_CONTENT_TYPES_BY_EXTENSION.get(extension)
     if allowed_content_types is None or content_type not in allowed_content_types:
         raise bad_request("Attachment type is not supported")
+
+
+async def validate_attachment_signature(upload: UploadFile, content_type: str) -> None:
+    prefix = await upload.read(4096)
+    await upload.seek(0)
+    if not prefix:
+        raise bad_request("Attachment content is empty")
+
+    filename = upload.filename or ""
+    extension = safe_extension(filename)
+    if content_type == "application/pdf" or extension == ".pdf":
+        if prefix.startswith(b"%PDF"):
+            return
+        raise bad_request("Attachment content does not match declared type")
+
+    if extension in {".docx", ".xlsx"}:
+        if prefix.startswith(b"PK"):
+            return
+        raise bad_request("Attachment content does not match declared type")
+
+    if content_type == "text/plain" or extension == ".txt":
+        try:
+            prefix.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise bad_request("Attachment content does not match declared type") from exc
+        return
+
+    if extension in {".doc", ".xls"}:
+        return
+
+    raise bad_request("Attachment type is not supported")
 
 
 async def store_upload(upload: UploadFile, *, item_id: int, media_type: str) -> tuple[str, int]:

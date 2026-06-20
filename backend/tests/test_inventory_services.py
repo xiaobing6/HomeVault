@@ -112,7 +112,8 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
     in_stock = ItemStatus(code="in_stock", name="In stock", semantic="in_inventory", sort_order=10, is_system=True)
     loaned = ItemStatus(code="loaned", name="Loaned", semantic="away", sort_order=20, is_system=True)
     removed = ItemStatus(code="removed", name="Removed", semantic="removed", sort_order=30, is_system=True)
-    db_session.add_all([creator, editor, archiver, home, category, in_stock, loaned, removed])
+    retired = ItemStatus(code="retired", name="Retired", semantic="retired", sort_order=40, is_system=True)
+    db_session.add_all([creator, editor, archiver, home, category, in_stock, loaned, removed, retired])
     db_session.commit()
 
     return {
@@ -132,6 +133,7 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
         "in_stock": in_stock,
         "loaned": loaned,
         "removed": removed,
+        "retired": retired,
     }
 
 
@@ -335,6 +337,86 @@ def test_list_items_filters_by_container_placement(
     assert placed_in_container.total == 1
 
 
+def test_list_items_filters_by_effective_container_location(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    closet = inventory_seed["closet"]
+    drawer = inventory_seed["drawer"]
+    container = create_item(
+        db_session,
+        make_create_payload(inventory_seed, name="Document box", location_node_id=closet.id),
+    )
+    child = create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            name="Birth certificate",
+            location_node_id=None,
+            container_item_id=container.id,
+            is_container=False,
+        ),
+    )
+    create_item(db_session, make_create_payload(inventory_seed, name="Loose passport", location_node_id=drawer.id))
+
+    by_location = list_items(db_session, ItemListQuery(location_node_id=closet.id, sort="name_asc"))
+    child_detail = get_item_detail(db_session, child.id)
+
+    assert [item.name for item in by_location.items] == ["Birth certificate", "Document box"]
+    assert by_location.total == 2
+    assert child_detail.container_item_id == container.id
+    assert child_detail.location_node_id == closet.id
+    assert child_detail.location_node_name == "Bedroom closet"
+    assert child_detail.residence_id == inventory_seed["residence"].id
+    assert child_detail.residence_name == "Main residence"
+
+
+def test_list_items_filters_multilevel_container_chain_by_effective_residence(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    home = inventory_seed["home"]
+    annex = Residence(name="Annex", home_space=home)
+    annex_shelf = LocationNode(residence=annex, name="Annex shelf", node_type="shelf", sort_order=10)
+    db_session.add_all([annex, annex_shelf])
+    db_session.commit()
+    outer = create_item(
+        db_session,
+        make_create_payload(inventory_seed, name="Outer box", location_node_id=annex_shelf.id),
+    )
+    inner = create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            name="Inner box",
+            location_node_id=None,
+            container_item_id=outer.id,
+        ),
+    )
+    nested_child = create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            name="Nested certificate",
+            location_node_id=None,
+            container_item_id=inner.id,
+            is_container=False,
+        ),
+    )
+    create_item(db_session, make_create_payload(inventory_seed, name="Main residence loose item"))
+
+    by_residence = list_items(db_session, ItemListQuery(residence_id=annex.id, sort="name_asc"))
+    nested_detail = get_item_detail(db_session, nested_child.id)
+
+    assert [item.name for item in by_residence.items] == ["Inner box", "Nested certificate", "Outer box"]
+    assert by_residence.total == 3
+    assert nested_detail.container_item_id == inner.id
+    assert nested_detail.location_node_id == annex_shelf.id
+    assert nested_detail.location_node_name == "Annex shelf"
+    assert nested_detail.residence_id == annex.id
+    assert nested_detail.residence_name == "Annex"
+
+
 def test_list_items_on_loan_false_excludes_active_loan_even_when_status_is_in_stock(
     db_session: Session,
     inventory_seed: dict[str, object],
@@ -423,6 +505,31 @@ def test_update_item_does_not_change_quantity_silently(
     assert len(quantity_changes) == 1
 
 
+def test_update_item_rejects_unsetting_container_with_active_children(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    parent = create_item(db_session, make_create_payload(inventory_seed, name="Parent box", is_container=True))
+    create_item(
+        db_session,
+        make_create_payload(
+            inventory_seed,
+            name="Child folder",
+            location_node_id=None,
+            container_item_id=parent.id,
+            is_container=False,
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        update_item(db_session, parent.id, ItemUpdate(is_container=False), actor_id=7)
+
+    stored_parent = db_session.get(Item, parent.id)
+    assert exc_info.value.status_code == 400
+    assert stored_parent is not None
+    assert stored_parent.is_container is True
+
+
 def test_archive_item_hides_from_default_list(
     db_session: Session,
     inventory_seed: dict[str, object],
@@ -462,7 +569,7 @@ def test_move_item_writes_movement_history_and_updates_location_then_container(
     ).all()
 
     assert moved_to_location.location_node_id == inventory_seed["closet"].id
-    assert moved_to_container.location_node_id is None
+    assert moved_to_container.location_node_id == inventory_seed["drawer"].id
     assert moved_to_container.container_item_id == container.id
     assert [movement.movement_type for movement in movements] == ["move", "move"]
     assert movements[0].previous_location_node_id == inventory_seed["drawer"].id
@@ -648,6 +755,29 @@ def test_create_loan_rejects_active_loan_and_writes_status_movement(
     assert movement.reason == "Loaned"
     assert movement.note == "Weekend"
     assert movement.actor_id == 7
+
+
+@pytest.mark.parametrize("status_key", ["removed", "retired"])
+def test_create_loan_rejects_exit_status_item(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+    status_key: str,
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed, name=f"{status_key} item"))
+    change_item_status(
+        db_session,
+        item.id,
+        ChangeStatusRequest(status_id=inventory_seed[status_key].id, reason="Exit inventory"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        create_loan(db_session, item.id, LoanCreate(borrower_name="Taylor"))
+
+    stored_item = db_session.get(Item, item.id)
+    assert exc_info.value.status_code == 400
+    assert stored_item is not None
+    assert stored_item.status_id == inventory_seed[status_key].id
+    assert db_session.scalars(select(ItemLoan).where(ItemLoan.item_id == item.id)).all() == []
 
 
 def test_return_loan_sets_returned_at_updates_placement_status_and_writes_movement(

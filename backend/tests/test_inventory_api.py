@@ -257,8 +257,10 @@ def test_inventory_api_rejects_container_cycle(client: TestClient, db_session: S
 
 def test_inventory_api_uploads_image_and_attachment(client: TestClient, db_session: Session) -> None:
     headers = login(client)
+    viewer_headers = login(client, "viewer", "Viewer123!")
     ids = inventory_ids(db_session)
     item = create_item(client, headers, ids)
+    other_item = create_item(client, headers, ids, name="Other folder")
 
     image = client.post(
         f"/api/items/{item['id']}/images",
@@ -281,21 +283,43 @@ def test_inventory_api_uploads_image_and_attachment(client: TestClient, db_sessi
     )
     assert attachment.status_code == 201
     attachment_id = attachment.json()["id"]
+    image_file_url = f"/api/items/{item['id']}/images/{image_id}/file"
+    attachment_download_url = f"/api/items/{item['id']}/attachments/{attachment_id}/download"
 
     detail = client.get(f"/api/items/{item['id']}", headers=headers)
+    anonymous_image = client.get(image_file_url)
+    anonymous_attachment = client.get(attachment_download_url)
+    viewer_image = client.get(image_file_url, headers=viewer_headers)
+    viewer_attachment = client.get(attachment_download_url, headers=viewer_headers)
+    wrong_item_image = client.get(
+        f"/api/items/{other_item['id']}/images/{image_id}/file",
+        headers=viewer_headers,
+    )
+    missing_attachment_path = Path(get_settings().upload_dir) / attachment.json()["file_path"]
+    missing_attachment_path.unlink()
+    missing_attachment = client.get(attachment_download_url, headers=viewer_headers)
     image_delete = client.delete(f"/api/items/{item['id']}/images/{image_id}", headers=headers)
     attachment_delete = client.delete(
         f"/api/items/{item['id']}/attachments/{attachment_id}",
         headers=headers,
     )
 
-    assert image.json()["url"].startswith("/uploads/items/")
+    assert image.json()["url"] == image_file_url
     assert image.json()["is_primary"] is True
     assert image_update.status_code == 200
     assert image_update.json()["sort_order"] == 5
-    assert attachment.json()["download_url"].startswith("/uploads/items/")
-    assert detail.json()["images"][0]["url"].startswith("/uploads/items/")
-    assert detail.json()["attachments"][0]["download_url"].startswith("/uploads/items/")
+    assert attachment.json()["download_url"] == attachment_download_url
+    assert detail.json()["primary_image_url"] == image_file_url
+    assert detail.json()["images"][0]["url"] == image_file_url
+    assert detail.json()["attachments"][0]["download_url"] == attachment_download_url
+    assert anonymous_image.status_code == 401
+    assert anonymous_attachment.status_code == 401
+    assert viewer_image.status_code == 200
+    assert viewer_image.content == PNG_BYTES
+    assert viewer_attachment.status_code == 200
+    assert viewer_attachment.content == b"%PDF-1.7\n"
+    assert wrong_item_image.status_code == 404
+    assert missing_attachment.status_code == 404
     assert image_delete.status_code == 200
     assert image_delete.json()["images"] == []
     assert attachment_delete.status_code == 200

@@ -18,6 +18,7 @@ import type {
   ItemQuantityChange
 } from '../../api/inventory'
 import MediaUploader from './MediaUploader.vue'
+import ProtectedImage from './ProtectedImage.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -69,6 +70,12 @@ const privacyLabel = computed(() => {
 const canMoveItem = computed(() => {
   const item = props.item
   if (!item) return false
+  return !EXIT_STATUS_SEMANTICS.has(item.status_semantic)
+})
+
+const canBorrowItem = computed(() => {
+  const item = props.item
+  if (!item || activeLoan.value) return false
   return !EXIT_STATUS_SEMANTICS.has(item.status_semantic)
 })
 
@@ -179,7 +186,7 @@ function quantityText(row: ItemQuantityChange): string {
             状态
           </el-button>
           <el-button
-            v-if="canEdit && !item.is_archived && !activeLoan"
+            v-if="canEdit && !item.is_archived && canBorrowItem"
             :icon="Tickets"
             @click="emit('borrow')"
           >
@@ -214,7 +221,13 @@ function quantityText(row: ItemQuantityChange): string {
           <el-tab-pane label="概览">
             <div class="overview-layout">
               <div class="overview-image">
-                <img v-if="item.primary_image_url" :src="item.primary_image_url" :alt="item.name" />
+                <ProtectedImage
+                  v-if="item.primary_image_url"
+                  :src="item.primary_image_url"
+                  :alt="item.name"
+                >
+                  <el-icon><Box /></el-icon>
+                </ProtectedImage>
                 <el-icon v-else><Box /></el-icon>
               </div>
 

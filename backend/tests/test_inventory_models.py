@@ -81,7 +81,7 @@ def test_inventory_models_persist_item_with_tag_media_history_and_loan(db_sessio
         ItemImage(
             original_filename="box.jpg",
             stored_filename="box-1.jpg",
-            file_path="/uploads/items/box-1.jpg",
+            file_path="items/1/images/box-1.jpg",
             content_type="image/jpeg",
             byte_size=1200,
             is_primary=True,
@@ -92,7 +92,7 @@ def test_inventory_models_persist_item_with_tag_media_history_and_loan(db_sessio
         ItemAttachment(
             original_filename="receipt.pdf",
             stored_filename="receipt-1.pdf",
-            file_path="/uploads/items/receipt-1.pdf",
+            file_path="items/1/attachments/receipt-1.pdf",
             content_type="application/pdf",
             byte_size=2048,
         )

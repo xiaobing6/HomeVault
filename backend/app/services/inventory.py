@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
+from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy import func, or_, select
@@ -57,8 +58,11 @@ from app.schemas.inventory import (
 from app.services.uploads import (
     IMAGE_CONTENT_TYPES,
     delete_stored_upload,
-    public_upload_url,
+    protected_attachment_download_url,
+    protected_image_url,
     store_upload,
+    stored_upload_path,
+    validate_attachment_signature,
     validate_attachment_metadata,
     validate_image_signature,
 )
@@ -72,7 +76,7 @@ except ImportError:
 
 
 MAX_CONTAINER_DEPTH = 5
-EXIT_STATUS_SEMANTICS = {"removed", "missing", "consumed"}
+EXIT_STATUS_SEMANTICS = {"removed", "missing", "consumed", "retired", "lost", "disposed"}
 INITIAL_QUANTITY_REASON = "\u521d\u59cb\u6570\u91cf"
 
 
@@ -80,6 +84,13 @@ INITIAL_QUANTITY_REASON = "\u521d\u59cb\u6570\u91cf"
 class PlacementTarget:
     location_node: LocationNode | None
     container_item: Item | None
+
+
+@dataclass(frozen=True)
+class MediaFile:
+    path: Path
+    filename: str
+    content_type: str
 
 
 def utcnow() -> datetime:
@@ -127,6 +138,12 @@ def require_active_status(db: Session, status_id: int) -> ItemStatus:
     return item_status
 
 
+def is_exit_status(item_status: ItemStatus | None) -> bool:
+    if item_status is None:
+        return False
+    return item_status.semantic in EXIT_STATUS_SEMANTICS or item_status.code in EXIT_STATUS_SEMANTICS
+
+
 def assert_member_exists(db: Session, member_id: int | None) -> None:
     if member_id is None:
         return
@@ -147,6 +164,14 @@ def has_active_loan(db: Session, item_id: int) -> bool:
     return db.scalar(
         select(ItemLoan.id)
         .where(ItemLoan.item_id == item_id, ItemLoan.returned_at.is_(None))
+        .limit(1)
+    ) is not None
+
+
+def has_active_children(db: Session, item_id: int) -> bool:
+    return db.scalar(
+        select(Item.id)
+        .where(Item.container_item_id == item_id, Item.is_archived.is_(False))
         .limit(1)
     ) is not None
 
@@ -192,9 +217,9 @@ def validate_basic_placement(
 ) -> PlacementTarget:
     if location_node_id is not None and container_item_id is not None:
         raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668\uff0c\u4e0d\u80fd\u540c\u65f6\u9009\u62e9\u4e24\u8005")
-    if status.semantic in EXIT_STATUS_SEMANTICS and (location_node_id is not None or container_item_id is not None):
+    if is_exit_status(status) and (location_node_id is not None or container_item_id is not None):
         raise bad_request("\u9000\u51fa\u72b6\u6001\u7684\u7269\u54c1\u4e0d\u80fd\u5206\u914d\u4f4d\u7f6e\u6216\u5bb9\u5668")
-    if status.semantic not in EXIT_STATUS_SEMANTICS and location_node_id is None and container_item_id is None:
+    if not is_exit_status(status) and location_node_id is None and container_item_id is None:
         raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668")
 
     location_node: LocationNode | None = None
@@ -508,6 +533,13 @@ def update_item(
         item.owner_member_id = payload.owner_member_id
     if "keeper_member_id" in fields:
         item.keeper_member_id = payload.keeper_member_id
+    if (
+        "is_container" in fields
+        and payload.is_container is False
+        and item.is_container
+        and has_active_children(db, item.id)
+    ):
+        raise bad_request("\u8bf7\u5148\u79fb\u8d70\u6216\u5f52\u6863\u5b50\u7269\u54c1")
     if "is_container" in fields and payload.is_container is not None:
         item.is_container = payload.is_container
     if "privacy_level" in fields and payload.privacy_level is not None:
@@ -574,7 +606,7 @@ async def add_item_image(
             delete_stored_upload(file_path)
         raise bad_request("\u56fe\u7247\u4fdd\u5b58\u5931\u8d25") from exc
     db.refresh(image)
-    return ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
+    return ItemImageResponse.model_validate({**image.__dict__, "url": protected_image_url(item.id, image.id)})
 
 
 async def add_item_attachment(
@@ -586,6 +618,7 @@ async def add_item_attachment(
     item = require_item(db, item_id)
     content_type = upload.content_type or ""
     validate_attachment_metadata(upload.filename, content_type)
+    await validate_attachment_signature(upload, content_type)
     file_path = ""
     try:
         file_path, byte_size = await store_upload(upload, item_id=item.id, media_type="attachments")
@@ -613,7 +646,7 @@ async def add_item_attachment(
         raise bad_request("\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25") from exc
     db.refresh(attachment)
     return ItemAttachmentResponse.model_validate(
-        {**attachment.__dict__, "download_url": public_upload_url(attachment.file_path)}
+        {**attachment.__dict__, "download_url": protected_attachment_download_url(item.id, attachment.id)}
     )
 
 
@@ -677,7 +710,7 @@ def update_item_image_metadata(
     item.updated_by_id = actor_id
     commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
     db.refresh(image)
-    return ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
+    return ItemImageResponse.model_validate({**image.__dict__, "url": protected_image_url(item.id, image.id)})
 
 
 def archive_item(
@@ -706,7 +739,7 @@ def move_item(
     if payload.location_node_id is None and payload.container_item_id is None:
         raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668")
     item_status = require_active_status(db, item.status_id)
-    if item_status.semantic in EXIT_STATUS_SEMANTICS:
+    if is_exit_status(item_status):
         raise bad_request("\u9000\u51fa\u72b6\u6001\u7684\u7269\u54c1\u4e0d\u80fd\u79fb\u52a8")
     placement = validate_basic_placement(
         db,
@@ -752,7 +785,7 @@ def change_item_status(
     previous_container_item_id = item.container_item_id
     previous_status_id = item.status_id
 
-    if target_status.semantic in EXIT_STATUS_SEMANTICS:
+    if is_exit_status(target_status):
         item.location_node_id = None
         item.container_item_id = None
     else:
@@ -840,6 +873,9 @@ def create_loan(
     actor_id: int | None = None,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
+    item_status = require_active_status(db, item.status_id)
+    if is_exit_status(item_status):
+        raise bad_request("\u9000\u51fa\u72b6\u6001\u7684\u7269\u54c1\u4e0d\u80fd\u501f\u51fa")
     if has_active_loan(db, item.id):
         raise bad_request("\u7269\u54c1\u5df2\u6709\u672a\u5f52\u8fd8\u501f\u51fa\u8bb0\u5f55")
 
@@ -939,6 +975,35 @@ def return_loan(
     return get_item_detail(db, item_id)
 
 
+def resolve_effective_location(item: Item) -> tuple[LocationNode | None, object | None]:
+    current: Item | None = item
+    visited: set[int] = set()
+    depth = 0
+    while current is not None:
+        if current.id in visited or depth > MAX_CONTAINER_DEPTH:
+            return None, None
+        visited.add(current.id)
+        if current.location_node is not None:
+            location_node = current.location_node
+            return location_node, location_node.residence
+        if current.container_item_id is None:
+            return None, None
+        current = current.container_item
+        depth += 1
+    return None, None
+
+
+def matches_effective_location(item: Item, query: ItemListQuery) -> bool:
+    location_node, _residence = resolve_effective_location(item)
+    if query.location_node_id is not None:
+        if location_node is None or location_node.id != query.location_node_id:
+            return False
+    if query.residence_id is not None:
+        if location_node is None or location_node.residence_id != query.residence_id:
+            return False
+    return True
+
+
 def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
     stmt = select(Item)
     if not query.include_archived:
@@ -947,12 +1012,8 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
         stmt = stmt.where(Item.category_id == query.category_id)
     if query.status_id is not None:
         stmt = stmt.where(Item.status_id == query.status_id)
-    if query.location_node_id is not None:
-        stmt = stmt.where(Item.location_node_id == query.location_node_id)
     if query.container_item_id is not None:
         stmt = stmt.where(Item.container_item_id == query.container_item_id)
-    if query.residence_id is not None:
-        stmt = stmt.where(Item.location_node.has(LocationNode.residence_id == query.residence_id))
     if query.owner_member_id is not None:
         stmt = stmt.where(Item.owner_member_id == query.owner_member_id)
     if query.keeper_member_id is not None:
@@ -986,14 +1047,26 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
     elif query.is_on_loan is False:
         stmt = stmt.where(~on_loan_predicate)
 
-    total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
-    stmt = (
-        apply_list_sort(stmt, query.sort)
-        .options(*item_response_options())
-        .limit(query.page_size)
-        .offset((query.page - 1) * query.page_size)
-    )
-    items = db.scalars(stmt).unique().all()
+    uses_effective_location_filter = query.location_node_id is not None or query.residence_id is not None
+    if uses_effective_location_filter:
+        sorted_stmt = apply_list_sort(stmt, query.sort).options(*item_response_options())
+        filtered_items = [
+            item
+            for item in db.scalars(sorted_stmt).unique().all()
+            if matches_effective_location(item, query)
+        ]
+        total = len(filtered_items)
+        offset = (query.page - 1) * query.page_size
+        items = filtered_items[offset : offset + query.page_size]
+    else:
+        total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+        stmt = (
+            apply_list_sort(stmt, query.sort)
+            .options(*item_response_options())
+            .limit(query.page_size)
+            .offset((query.page - 1) * query.page_size)
+        )
+        items = db.scalars(stmt).unique().all()
     return ItemListResponse(
         items=[build_item_summary_response(item) for item in items],
         total=total,
@@ -1033,6 +1106,40 @@ def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
     if item is None:
         raise not_found("\u7269\u54c1\u4e0d\u5b58\u5728")
     return build_item_detail_response(item)
+
+
+def stored_media_file(relative_path: str) -> Path:
+    root = stored_upload_path("").resolve()
+    path = stored_upload_path(relative_path).resolve()
+    if path != root and root not in path.parents:
+        raise not_found("\u5a92\u4f53\u6587\u4ef6\u4e0d\u5b58\u5728")
+    if not path.is_file():
+        raise not_found("\u5a92\u4f53\u6587\u4ef6\u4e0d\u5b58\u5728")
+    return path
+
+
+def get_item_image_file(db: Session, item_id: int, image_id: int) -> MediaFile:
+    item = require_item(db, item_id)
+    image = db.get(ItemImage, image_id)
+    if item.is_archived or image is None or image.item_id != item.id or image.is_archived:
+        raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
+    return MediaFile(
+        path=stored_media_file(image.file_path),
+        filename=image.original_filename,
+        content_type=image.content_type,
+    )
+
+
+def get_item_attachment_file(db: Session, item_id: int, attachment_id: int) -> MediaFile:
+    item = require_item(db, item_id)
+    attachment = db.get(ItemAttachment, attachment_id)
+    if item.is_archived or attachment is None or attachment.item_id != item.id or attachment.is_archived:
+        raise not_found("\u9644\u4ef6\u4e0d\u5b58\u5728")
+    return MediaFile(
+        path=stored_media_file(attachment.file_path),
+        filename=attachment.original_filename,
+        content_type=attachment.content_type,
+    )
 
 
 def replace_attribute_values(db: Session, item: Item, values: dict[int, str]) -> None:
@@ -1160,8 +1267,7 @@ def apply_list_sort(stmt, sort: str):
 
 
 def build_item_summary_response(item: Item) -> ItemSummaryResponse:
-    location_node = item.location_node
-    residence = location_node.residence if location_node is not None else None
+    location_node, residence = resolve_effective_location(item)
     primary_image = first_active_primary_image(item)
     return ItemSummaryResponse(
         id=item.id,
@@ -1178,7 +1284,7 @@ def build_item_summary_response(item: Item) -> ItemSummaryResponse:
         owner_member_name=item.owner_member.name if item.owner_member is not None else None,
         keeper_member_id=item.keeper_member_id,
         keeper_member_name=item.keeper_member.name if item.keeper_member is not None else None,
-        location_node_id=item.location_node_id,
+        location_node_id=location_node.id if location_node is not None else None,
         location_node_name=location_node.name if location_node is not None else None,
         residence_id=residence.id if residence is not None else None,
         residence_name=residence.name if residence is not None else None,
@@ -1187,7 +1293,11 @@ def build_item_summary_response(item: Item) -> ItemSummaryResponse:
         is_container=item.is_container,
         privacy_level=item.privacy_level,
         is_archived=item.is_archived,
-        primary_image_url=public_upload_url(primary_image.file_path) if primary_image is not None else None,
+        primary_image_url=(
+            protected_image_url(item.id, primary_image.id)
+            if primary_image is not None
+            else None
+        ),
         tags=build_tag_responses(item),
         created_at=item.created_at,
         updated_at=item.updated_at,
@@ -1268,7 +1378,7 @@ def first_active_primary_image(item: Item):
 
 def build_image_responses(item: Item) -> list[ItemImageResponse]:
     return [
-        ItemImageResponse.model_validate({**image.__dict__, "url": public_upload_url(image.file_path)})
+        ItemImageResponse.model_validate({**image.__dict__, "url": protected_image_url(item.id, image.id)})
         for image in sorted(
             (image for image in item.images if not image.is_archived),
             key=lambda image: (image.sort_order, image.id),
@@ -1279,7 +1389,10 @@ def build_image_responses(item: Item) -> list[ItemImageResponse]:
 def build_attachment_responses(item: Item) -> list[ItemAttachmentResponse]:
     return [
         ItemAttachmentResponse.model_validate(
-            {**attachment.__dict__, "download_url": public_upload_url(attachment.file_path)}
+            {
+                **attachment.__dict__,
+                "download_url": protected_attachment_download_url(item.id, attachment.id),
+            }
         )
         for attachment in sorted(
             (attachment for attachment in item.attachments if not attachment.is_archived),

@@ -2,6 +2,7 @@
 import { Box, Collection, Location, User } from '@element-plus/icons-vue'
 
 import type { ItemSummary } from '../../api/inventory'
+import ProtectedImage from './ProtectedImage.vue'
 
 defineProps<{
   items: ItemSummary[]
@@ -24,7 +25,13 @@ const emit = defineEmits<{
       @click="emit('open-detail', item.id)"
     >
       <div class="thumb">
-        <img v-if="item.primary_image_url" :src="item.primary_image_url" :alt="item.name" />
+        <ProtectedImage
+          v-if="item.primary_image_url"
+          :src="item.primary_image_url"
+          :alt="item.name"
+        >
+          <el-icon><Box /></el-icon>
+        </ProtectedImage>
         <el-icon v-else><Box /></el-icon>
       </div>
 

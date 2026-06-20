@@ -19,7 +19,7 @@ interface OptionItem {
   value: number
 }
 
-const EXIT_STATUS_SEMANTICS = new Set(['removed', 'missing', 'consumed'])
+const EXIT_STATUS_SEMANTICS = new Set(['removed', 'missing', 'consumed', 'retired', 'lost', 'disposed'])
 
 const props = defineProps<{
   modelValue: boolean
@@ -313,6 +313,10 @@ function validateSubmit(): boolean {
     return true
   }
   if (props.action === 'borrow') {
+    if (EXIT_STATUS_SEMANTICS.has(props.item.status_semantic)) {
+      ElMessage.warning('当前状态不能借出')
+      return false
+    }
     if (!borrowForm.borrower_name.trim()) {
       ElMessage.warning('请输入借用人')
       return false

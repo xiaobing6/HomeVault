@@ -3,7 +3,6 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.core.config import get_settings
@@ -14,11 +13,6 @@ def create_app() -> FastAPI:
     application = FastAPI(title=settings.app_name, version="0.1.0")
     application.include_router(api_router, prefix="/api")
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    application.mount(
-        "/uploads",
-        StaticFiles(directory=settings.upload_dir, check_dir=False),
-        name="uploads",
-    )
 
     @application.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_permission
@@ -34,7 +35,9 @@ from app.services.inventory import (
     create_item,
     create_loan,
     create_tag,
+    get_item_attachment_file,
     get_item_detail,
+    get_item_image_file,
     list_items,
     list_movements,
     list_quantity_changes,
@@ -180,6 +183,22 @@ async def upload_inventory_item_image(
     return await add_item_image(db, item_id, file, is_primary=is_primary, actor_id=user.id)
 
 
+@router.get("/items/{item_id}/images/{image_id}/file")
+def download_inventory_item_image(
+    item_id: int,
+    image_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(READ_PERMISSION)),
+) -> FileResponse:
+    media_file = get_item_image_file(db, item_id, image_id)
+    return FileResponse(
+        media_file.path,
+        media_type=media_file.content_type,
+        filename=media_file.filename,
+        content_disposition_type="inline",
+    )
+
+
 @router.patch("/items/{item_id}/images/{image_id}", response_model=ItemImageResponse)
 def update_inventory_item_image(
     item_id: int,
@@ -209,6 +228,21 @@ async def upload_inventory_item_attachment(
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemAttachmentResponse:
     return await add_item_attachment(db, item_id, file, actor_id=user.id)
+
+
+@router.get("/items/{item_id}/attachments/{attachment_id}/download")
+def download_inventory_item_attachment(
+    item_id: int,
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(READ_PERMISSION)),
+) -> FileResponse:
+    media_file = get_item_attachment_file(db, item_id, attachment_id)
+    return FileResponse(
+        media_file.path,
+        media_type=media_file.content_type,
+        filename=media_file.filename,
+    )
 
 
 @router.delete("/items/{item_id}/attachments/{attachment_id}", response_model=ItemDetailResponse)

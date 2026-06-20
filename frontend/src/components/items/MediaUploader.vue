@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { Picture, Paperclip, Plus, UploadFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 
+import { getChineseErrorMessage } from '../../api/client'
 import type { ItemAttachment, ItemImage } from '../../api/inventory'
+import { downloadProtectedMedia } from '../../api/media'
+import ProtectedImage from './ProtectedImage.vue'
 
 const props = withDefaults(defineProps<{
   images?: ItemImage[]
@@ -50,6 +54,15 @@ function formatSize(size: number): string {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
+
+async function downloadAttachment(attachment: ItemAttachment) {
+  if (!attachment.download_url) return
+  try {
+    await downloadProtectedMedia(attachment.download_url, attachment.original_filename)
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  }
+}
 </script>
 
 <template>
@@ -61,18 +74,17 @@ function formatSize(size: number): string {
       </div>
 
       <div v-if="images.length > 0" class="image-grid">
-        <a
+        <div
           v-for="image in images"
           :key="image.id"
           class="image-preview"
-          :href="image.url || undefined"
-          target="_blank"
-          rel="noreferrer"
         >
-          <img v-if="image.url" :src="image.url" :alt="image.original_filename" />
+          <ProtectedImage v-if="image.url" :src="image.url" :alt="image.original_filename">
+            <el-icon><Picture /></el-icon>
+          </ProtectedImage>
           <el-icon v-else><Picture /></el-icon>
           <el-tag v-if="image.is_primary" size="small" type="success">主图</el-tag>
-        </a>
+        </div>
       </div>
       <el-empty v-else description="暂无图片" :image-size="64" />
 
@@ -110,14 +122,14 @@ function formatSize(size: number): string {
       <div v-if="attachments.length > 0" class="attachment-list">
         <div v-for="attachment in attachments" :key="attachment.id" class="attachment-item">
           <el-icon><UploadFilled /></el-icon>
-          <a
+          <button
             v-if="attachment.download_url"
-            :href="attachment.download_url"
-            target="_blank"
-            rel="noreferrer"
+            class="attachment-download"
+            type="button"
+            @click="downloadAttachment(attachment)"
           >
             {{ attachment.original_filename }}
-          </a>
+          </button>
           <span v-else>{{ attachment.original_filename }}</span>
           <small>{{ formatSize(attachment.byte_size) }}</small>
         </div>
@@ -223,13 +235,28 @@ function formatSize(size: number): string {
   border-radius: 6px;
 }
 
-.attachment-item a,
+.attachment-item button,
 .attachment-item span {
   min-width: 0;
   overflow: hidden;
   color: #25342d;
+  font: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.attachment-item button {
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.attachment-item button:hover,
+.attachment-item button:focus-visible {
+  color: #256f46;
+  outline: none;
 }
 
 .attachment-item small {

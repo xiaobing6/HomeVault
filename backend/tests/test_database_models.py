@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError
 
@@ -191,10 +192,12 @@ def test_inventory_migration_upgrade_and_downgrade_temp_sqlite(tmp_path: Path) -
     cfg = alembic_config(str(db_path))
 
     try:
-        command.upgrade(cfg, "20260619_0003")
+        command.upgrade(cfg, "head")
 
         engine = create_engine(f"sqlite:///{db_path}")
         inspector = inspect(engine)
+        item_image_indexes = {index["name"] for index in inspector.get_indexes("item_images")}
+        item_loan_indexes = {index["name"] for index in inspector.get_indexes("item_loans")}
         assert "items" in inspector.get_table_names()
         assert "item_attribute_values" in inspector.get_table_names()
         assert "item_images" in inspector.get_table_names()
@@ -204,9 +207,24 @@ def test_inventory_migration_upgrade_and_downgrade_temp_sqlite(tmp_path: Path) -
         assert "item_movements" in inspector.get_table_names()
         assert "item_quantity_changes" in inspector.get_table_names()
         assert "item_loans" in inspector.get_table_names()
+        assert "uq_item_images_active_primary_item_id" in item_image_indexes
+        assert "uq_item_loans_active_item_id" in item_loan_indexes
 
         command.downgrade(cfg, "20260619_0002")
         inspector = inspect(engine)
         assert "items" not in inspector.get_table_names()
+    finally:
+        restore_alembic_database_url(cfg)
+
+
+def test_inventory_partial_unique_index_guard_migration_exists(tmp_path: Path) -> None:
+    cfg = alembic_config(str(tmp_path / "inventory_guard.sqlite3"))
+
+    try:
+        script = ScriptDirectory.from_config(cfg)
+        revision = script.get_revision("20260620_0004")
+
+        assert revision is not None
+        assert revision.down_revision == "20260619_0003"
     finally:
         restore_alembic_database_url(cfg)
