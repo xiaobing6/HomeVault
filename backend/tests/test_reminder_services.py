@@ -315,3 +315,51 @@ def test_item_list_reminder_filters(db_session: Session, reminder_seed: dict[str
     assert overdue.items[0].id == item.id
     assert upcoming.total == 0
     assert pending.total == 1
+
+
+def test_item_list_upcoming_filter_excludes_overdue_due_date_with_future_remind_at(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+) -> None:
+    item = reminder_seed["item"]
+    today = server_today()
+    create_reminder(
+        db_session,
+        ReminderCreate(
+            title="Late with reminder",
+            item_id=item.id,
+            due_date=today - timedelta(days=1),
+            remind_at=today + timedelta(days=1),
+        ),
+        actor_id=10,
+    )
+
+    overdue = list_items(db_session, ItemListQuery(has_overdue_reminder=True))
+    upcoming = list_items(db_session, ItemListQuery(has_upcoming_reminder=True, reminder_upcoming_days=7))
+
+    assert overdue.total == 1
+    assert overdue.items[0].id == item.id
+    assert upcoming.total == 0
+
+
+def test_item_list_upcoming_filter_includes_past_remind_at_with_later_due_date(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+) -> None:
+    item = reminder_seed["item"]
+    today = server_today()
+    create_reminder(
+        db_session,
+        ReminderCreate(
+            title="Actionable before due date",
+            item_id=item.id,
+            due_date=today + timedelta(days=30),
+            remind_at=today - timedelta(days=1),
+        ),
+        actor_id=10,
+    )
+
+    upcoming = list_items(db_session, ItemListQuery(has_upcoming_reminder=True, reminder_upcoming_days=7))
+
+    assert upcoming.total == 1
+    assert upcoming.items[0].id == item.id

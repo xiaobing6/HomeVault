@@ -67,7 +67,12 @@ from app.services.uploads import (
     validate_attachment_metadata,
     validate_image_signature,
 )
-from app.services.reminders import complete_loan_return_reminder, server_today, sync_loan_return_reminder
+from app.services.reminders import (
+    REMINDER_STATUS_PENDING,
+    complete_loan_return_reminder,
+    server_today,
+    sync_loan_return_reminder,
+)
 
 try:
     from app.core.errors import not_found
@@ -1055,23 +1060,24 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
     reminder_cutoff = today + timedelta(days=query.reminder_upcoming_days)
     pending_reminder_predicate = Item.reminders.any(
         and_(
-            Reminder.status == "pending",
+            Reminder.status == REMINDER_STATUS_PENDING,
             Reminder.archived_at.is_(None),
         )
     )
     upcoming_reminder_predicate = Item.reminders.any(
         and_(
-            Reminder.status == "pending",
+            Reminder.status == REMINDER_STATUS_PENDING,
             Reminder.archived_at.is_(None),
+            or_(Reminder.due_date.is_(None), Reminder.due_date >= today),
             or_(
-                Reminder.due_date.between(today, reminder_cutoff),
-                Reminder.remind_at.between(today, reminder_cutoff),
+                Reminder.due_date <= reminder_cutoff,
+                Reminder.remind_at <= reminder_cutoff,
             ),
         )
     )
     overdue_reminder_predicate = Item.reminders.any(
         and_(
-            Reminder.status == "pending",
+            Reminder.status == REMINDER_STATUS_PENDING,
             Reminder.archived_at.is_(None),
             Reminder.due_date < today,
         )
