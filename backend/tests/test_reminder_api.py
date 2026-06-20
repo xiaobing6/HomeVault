@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models.auth import Role, User
 from app.models.configuration import Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
+from app.services.reminders import server_today
 from app.services.seed import seed_auth_baseline
 
 
@@ -107,11 +109,12 @@ def test_editor_can_create_filter_complete_reopen_dismiss_and_archive_reminder(
     headers = login(client, "editor", "Editor123!")
     ids = inventory_ids(db_session)
     item = create_item(client, headers, ids)
+    due_date = server_today() + timedelta(days=3)
 
     created = client.post(
         "/api/reminders",
         headers=headers,
-        json={"title": "Check passport", "item_id": item["id"], "due_date": "2026-07-01", "priority": "high"},
+        json={"title": "Check passport", "item_id": item["id"], "due_date": due_date.isoformat(), "priority": "high"},
     )
     reminder_id = created.json()["id"]
     listed = client.get("/api/reminders", headers=headers, params={"upcoming_days": 90})
