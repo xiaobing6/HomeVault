@@ -99,6 +99,22 @@ def test_overdue_filter_uses_due_date(db_session: Session, reminder_seed: dict[s
     assert listed.items[0].due_state == "overdue"
 
 
+def test_search_matches_linked_item_name(db_session: Session, reminder_seed: dict[str, object]) -> None:
+    item = reminder_seed["item"]
+    create_reminder(
+        db_session,
+        ReminderCreate(title="Renew document", description="Check folder", item_id=item.id),
+        actor_id=10,
+    )
+
+    listed = list_reminders(db_session, ReminderListQuery(search="Passport"))
+
+    assert listed.total == 1
+    assert listed.items[0].title == "Renew document"
+    assert listed.items[0].item is not None
+    assert listed.items[0].item.name == "Passport"
+
+
 def test_create_rejects_archived_item(db_session: Session, reminder_seed: dict[str, object]) -> None:
     item = reminder_seed["item"]
     item.is_archived = True

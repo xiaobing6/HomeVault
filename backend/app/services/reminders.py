@@ -183,7 +183,13 @@ def list_reminders(db: Session, query: ReminderListQuery) -> ReminderListRespons
     if query.search:
         search = f"%{query.search.strip()}%"
         if search != "%%":
-            stmt = stmt.where(or_(Reminder.title.ilike(search), Reminder.description.ilike(search)))
+            stmt = stmt.where(
+                or_(
+                    Reminder.title.ilike(search),
+                    Reminder.description.ilike(search),
+                    Reminder.item.has(Item.name.ilike(search)),
+                )
+            )
 
     total = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
     stmt = (
