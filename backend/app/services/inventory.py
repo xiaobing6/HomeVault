@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -31,6 +31,7 @@ from app.models.inventory import (
     ItemTag,
     Tag,
 )
+from app.models.reminders import Reminder
 from app.schemas.inventory import (
     ArchiveItemRequest,
     ChangeStatusRequest,
@@ -66,6 +67,7 @@ from app.services.uploads import (
     validate_attachment_metadata,
     validate_image_signature,
 )
+from app.services.reminders import complete_loan_return_reminder, server_today, sync_loan_return_reminder
 
 try:
     from app.core.errors import not_found
@@ -886,16 +888,17 @@ def create_loan(
     if loaned_status is not None:
         item.status_id = loaned_status.id
     item.updated_by_id = actor_id
-    db.add(
-        ItemLoan(
-            item_id=item.id,
-            borrower_name=payload.borrower_name,
-            borrower_contact=payload.borrower_contact,
-            expected_return_date=payload.expected_return_date,
-            loan_note=payload.loan_note,
-            loan_actor_id=actor_id,
-        )
+    loan = ItemLoan(
+        item_id=item.id,
+        borrower_name=payload.borrower_name,
+        borrower_contact=payload.borrower_contact,
+        expected_return_date=payload.expected_return_date,
+        loan_note=payload.loan_note,
+        loan_actor_id=actor_id,
     )
+    db.add(loan)
+    flush_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    sync_loan_return_reminder(db, item=item, loan=loan, actor_id=actor_id)
     add_item_movement(
         db,
         item=item,
@@ -953,6 +956,7 @@ def return_loan(
     loan.return_container_item_id = placement.container_item.id if placement.container_item is not None else None
     loan.return_note = payload.return_note
     loan.return_actor_id = actor_id
+    complete_loan_return_reminder(db, loan_id=loan.id, actor_id=actor_id)
     item.status_id = target_status.id
     item.location_node_id = loan.return_location_node_id
     item.container_item_id = loan.return_container_item_id
@@ -1046,6 +1050,44 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
         stmt = stmt.where(on_loan_predicate)
     elif query.is_on_loan is False:
         stmt = stmt.where(~on_loan_predicate)
+
+    today = server_today()
+    reminder_cutoff = today + timedelta(days=query.reminder_upcoming_days)
+    pending_reminder_predicate = Item.reminders.any(
+        and_(
+            Reminder.status == "pending",
+            Reminder.archived_at.is_(None),
+        )
+    )
+    upcoming_reminder_predicate = Item.reminders.any(
+        and_(
+            Reminder.status == "pending",
+            Reminder.archived_at.is_(None),
+            or_(
+                Reminder.due_date.between(today, reminder_cutoff),
+                Reminder.remind_at.between(today, reminder_cutoff),
+            ),
+        )
+    )
+    overdue_reminder_predicate = Item.reminders.any(
+        and_(
+            Reminder.status == "pending",
+            Reminder.archived_at.is_(None),
+            Reminder.due_date < today,
+        )
+    )
+    if query.has_pending_reminder is True:
+        stmt = stmt.where(pending_reminder_predicate)
+    elif query.has_pending_reminder is False:
+        stmt = stmt.where(~pending_reminder_predicate)
+    if query.has_upcoming_reminder is True:
+        stmt = stmt.where(upcoming_reminder_predicate)
+    elif query.has_upcoming_reminder is False:
+        stmt = stmt.where(~upcoming_reminder_predicate)
+    if query.has_overdue_reminder is True:
+        stmt = stmt.where(overdue_reminder_predicate)
+    elif query.has_overdue_reminder is False:
+        stmt = stmt.where(~overdue_reminder_predicate)
 
     uses_effective_location_filter = query.location_node_id is not None or query.residence_id is not None
     if uses_effective_location_filter:

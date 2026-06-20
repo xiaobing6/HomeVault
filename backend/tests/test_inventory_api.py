@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models.auth import Role, User
 from app.models.configuration import Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
+from app.services.reminders import server_today
 from app.services.seed import seed_auth_baseline
 
 
@@ -351,3 +353,31 @@ def test_inventory_api_ignores_false_primary_image_update(client: TestClient, db
     assert detail.status_code == 200
     assert detail.json()["images"][0]["is_primary"] is True
     assert detail.json()["primary_image_url"] == detail.json()["images"][0]["url"]
+
+
+def test_inventory_api_filters_items_by_reminders(client: TestClient, db_session: Session) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    item = create_item(client, headers, ids)
+    overdue_date = server_today() - timedelta(days=1)
+    reminder = client.post(
+        "/api/reminders",
+        headers=headers,
+        json={"title": "Late", "item_id": item["id"], "due_date": overdue_date.isoformat()},
+    )
+    overdue = client.get("/api/items", headers=headers, params={"has_overdue_reminder": True})
+    upcoming = client.get(
+        "/api/items",
+        headers=headers,
+        params={"has_upcoming_reminder": True, "reminder_upcoming_days": 7},
+    )
+    pending = client.get("/api/items", headers=headers, params={"has_pending_reminder": True})
+
+    assert reminder.status_code == 201
+    assert overdue.status_code == 200
+    assert overdue.json()["total"] == 1
+    assert overdue.json()["items"][0]["id"] == item["id"]
+    assert upcoming.status_code == 200
+    assert upcoming.json()["total"] == 0
+    assert pending.status_code == 200
+    assert pending.json()["total"] == 1

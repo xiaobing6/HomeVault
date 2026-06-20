@@ -142,6 +142,63 @@ def create_reminder(
     return get_reminder_detail(db, reminder.id)
 
 
+def sync_loan_return_reminder(
+    db: Session,
+    *,
+    item: Item,
+    loan: ItemLoan,
+    actor_id: int | None,
+) -> None:
+    if loan.expected_return_date is None:
+        return
+    reminder = db.scalar(
+        select(Reminder).where(
+            Reminder.source_type == REMINDER_SOURCE_LOAN_RETURN,
+            Reminder.loan_id == loan.id,
+            Reminder.archived_at.is_(None),
+        )
+    )
+    if reminder is None:
+        reminder = Reminder(
+            title=f"Return {item.name}",
+            description=loan.loan_note,
+            source_type=REMINDER_SOURCE_LOAN_RETURN,
+            item_id=item.id,
+            loan_id=loan.id,
+            status=REMINDER_STATUS_PENDING,
+            priority="normal",
+            created_by_user_id=actor_id,
+        )
+        db.add(reminder)
+    reminder.item_id = item.id
+    reminder.due_date = loan.expected_return_date
+    reminder.remind_at = loan.expected_return_date
+    reminder.updated_at = utcnow()
+
+
+def complete_loan_return_reminder(
+    db: Session,
+    *,
+    loan_id: int,
+    actor_id: int | None,
+) -> None:
+    reminder = db.scalar(
+        select(Reminder).where(
+            Reminder.source_type == REMINDER_SOURCE_LOAN_RETURN,
+            Reminder.loan_id == loan_id,
+            Reminder.status == REMINDER_STATUS_PENDING,
+            Reminder.archived_at.is_(None),
+        )
+    )
+    if reminder is None:
+        return
+    now = utcnow()
+    reminder.status = REMINDER_STATUS_DONE
+    reminder.completed_at = now
+    reminder.completed_by_user_id = actor_id
+    reminder.updated_at = now
+
+
 def get_reminder_detail(db: Session, reminder_id: int) -> ReminderDetailResponse:
     reminder = load_reminder_for_response(db, reminder_id)
     if reminder is None:

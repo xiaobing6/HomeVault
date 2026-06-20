@@ -6,14 +6,16 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
 from app.models.configuration import Category, HomeSpace, ItemStatus, LocationNode, Residence
 from app.models.inventory import Item, ItemLoan
 from app.models.reminders import Reminder
+from app.schemas.inventory import ItemListQuery, LoanCreate, LoanReturn
 from app.schemas.reminders import ReminderCreate, ReminderListQuery, ReminderUpdate
+from app.services.inventory import create_loan, list_items, return_loan
 from app.services import reminders as reminder_service
 from app.services.reminders import (
     archive_reminder,
@@ -23,6 +25,7 @@ from app.services.reminders import (
     get_reminder_detail,
     list_reminders,
     reopen_reminder,
+    server_today,
     update_reminder,
 )
 
@@ -257,3 +260,58 @@ def test_archive_reminder_preserves_first_archive_timestamp(
 
     assert saved is not None
     assert saved.archived_at == first_now
+
+
+def test_loan_with_expected_return_date_creates_and_completes_reminder(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+) -> None:
+    item = reminder_seed["item"]
+    expected_return_date = server_today() + timedelta(days=3)
+
+    detail = create_loan(
+        db_session,
+        item.id,
+        LoanCreate(borrower_name="Taylor", expected_return_date=expected_return_date),
+        actor_id=10,
+    )
+    loan_id = detail.loans[0].id
+    reminder = db_session.scalar(select(Reminder).where(Reminder.loan_id == loan_id))
+
+    assert reminder is not None
+    assert reminder.source_type == "loan_return"
+    assert reminder.item_id == item.id
+    assert reminder.due_date == expected_return_date
+    assert reminder.status == "pending"
+
+    returned = return_loan(
+        db_session,
+        item.id,
+        loan_id,
+        LoanReturn(location_node_id=item.location_node_id, target_status_id=item.status_id),
+        actor_id=10,
+    )
+    db_session.refresh(reminder)
+
+    assert returned.loans[0].returned_at is not None
+    assert reminder.status == "done"
+    assert reminder.completed_by_user_id == 10
+
+
+def test_item_list_reminder_filters(db_session: Session, reminder_seed: dict[str, object]) -> None:
+    item = reminder_seed["item"]
+    today = server_today()
+    create_reminder(
+        db_session,
+        ReminderCreate(title="Late", item_id=item.id, due_date=today - timedelta(days=1)),
+        actor_id=10,
+    )
+
+    overdue = list_items(db_session, ItemListQuery(has_overdue_reminder=True))
+    upcoming = list_items(db_session, ItemListQuery(has_upcoming_reminder=True, reminder_upcoming_days=7))
+    pending = list_items(db_session, ItemListQuery(has_pending_reminder=True))
+
+    assert overdue.total == 1
+    assert overdue.items[0].id == item.id
+    assert upcoming.total == 0
+    assert pending.total == 1

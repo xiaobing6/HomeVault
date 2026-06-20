@@ -71,6 +71,10 @@ class ItemListQuery(RequestModel):
     owner_member_id: int | None = None
     keeper_member_id: int | None = None
     container_only: bool | None = None
+    has_pending_reminder: bool | None = None
+    has_upcoming_reminder: bool | None = None
+    has_overdue_reminder: bool | None = None
+    reminder_upcoming_days: int = Field(default=7, ge=1, le=90)
     sort: str = "updated_desc"
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
