@@ -5,10 +5,10 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import HTTPException, status
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, raiseload, selectinload
 
 from app.core.errors import bad_request
-from app.models.inventory import Item
+from app.models.inventory import Item, ItemLoan
 from app.models.reminders import Reminder
 from app.schemas.reminders import (
     ReminderCreate,
@@ -56,7 +56,11 @@ def commit_or_bad_request(db: Session, message: str) -> None:
 
 
 def require_reminder(db: Session, reminder_id: int) -> Reminder:
-    reminder = load_reminder_for_response(db, reminder_id)
+    reminder = db.scalar(
+        select(Reminder)
+        .where(Reminder.id == reminder_id)
+        .options(raiseload("*"))
+    )
     if reminder is None:
         raise not_found("提醒不存在")
     return reminder
@@ -139,7 +143,9 @@ def create_reminder(
 
 
 def get_reminder_detail(db: Session, reminder_id: int) -> ReminderDetailResponse:
-    reminder = require_reminder(db, reminder_id)
+    reminder = load_reminder_for_response(db, reminder_id)
+    if reminder is None:
+        raise not_found("提醒不存在")
     return build_reminder_detail_response(reminder)
 
 
@@ -293,8 +299,13 @@ def archive_reminder(db: Session, reminder_id: int) -> ReminderDetailResponse:
 
 def reminder_response_options() -> tuple:
     return (
-        selectinload(Reminder.item),
-        selectinload(Reminder.loan),
+        raiseload("*"),
+        selectinload(Reminder.item)
+        .load_only(Item.id, Item.name, Item.is_archived)
+        .raiseload("*"),
+        selectinload(Reminder.loan)
+        .load_only(ItemLoan.id, ItemLoan.borrower_name, ItemLoan.expected_return_date, ItemLoan.returned_at)
+        .raiseload("*"),
     )
 
 

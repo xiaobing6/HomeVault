@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
@@ -23,6 +25,25 @@ from app.services.reminders import (
     reopen_reminder,
     update_reminder,
 )
+
+
+FIXED_TODAY = date(2026, 6, 20)
+
+
+@contextmanager
+def count_select_statements(db_session: Session) -> Iterator[list[str]]:
+    statements: list[str] = []
+
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    bind = db_session.get_bind()
+    event.listen(bind, "before_cursor_execute", before_cursor_execute)
+    try:
+        yield statements
+    finally:
+        event.remove(bind, "before_cursor_execute", before_cursor_execute)
 
 
 def test_server_today_uses_utc_date(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,11 +75,13 @@ def reminder_seed(db_session: Session) -> dict[str, object]:
 def test_create_list_update_complete_dismiss_reopen_and_archive_reminder(
     db_session: Session,
     reminder_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(reminder_service, "server_today", lambda: FIXED_TODAY)
     item = reminder_seed["item"]
     detail = create_reminder(
         db_session,
-        ReminderCreate(title="Check passport", item_id=item.id, due_date=date.today() + timedelta(days=2)),
+        ReminderCreate(title="Check passport", item_id=item.id, due_date=FIXED_TODAY + timedelta(days=2)),
         actor_id=10,
     )
     listed = list_reminders(db_session, ReminderListQuery(upcoming_days=7))
@@ -79,16 +102,21 @@ def test_create_list_update_complete_dismiss_reopen_and_archive_reminder(
     assert archived.archived_at is not None
 
 
-def test_overdue_filter_uses_due_date(db_session: Session, reminder_seed: dict[str, object]) -> None:
+def test_overdue_filter_uses_fixed_service_date(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reminder_service, "server_today", lambda: FIXED_TODAY)
     item = reminder_seed["item"]
     create_reminder(
         db_session,
-        ReminderCreate(title="Late", item_id=item.id, due_date=date.today() - timedelta(days=1)),
+        ReminderCreate(title="Late", item_id=item.id, due_date=FIXED_TODAY - timedelta(days=1)),
         actor_id=10,
     )
     create_reminder(
         db_session,
-        ReminderCreate(title="Soon", item_id=item.id, due_date=date.today() + timedelta(days=1)),
+        ReminderCreate(title="Soon", item_id=item.id, due_date=FIXED_TODAY + timedelta(days=1)),
         actor_id=10,
     )
 
@@ -97,6 +125,44 @@ def test_overdue_filter_uses_due_date(db_session: Session, reminder_seed: dict[s
     assert listed.total == 1
     assert listed.items[0].title == "Late"
     assert listed.items[0].due_state == "overdue"
+
+
+def test_list_reminders_returns_summaries_without_inventory_graph_overfetch(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reminder_service, "server_today", lambda: FIXED_TODAY)
+    item = reminder_seed["item"]
+    loan = ItemLoan(
+        item=item,
+        borrower_name="Taylor",
+        expected_return_date=FIXED_TODAY + timedelta(days=3),
+    )
+    reminder = Reminder(
+        title="Return followup",
+        description="",
+        source_type="loan_return",
+        item=item,
+        loan=loan,
+        due_date=FIXED_TODAY + timedelta(days=3),
+        status="pending",
+        priority="normal",
+        created_by_user_id=10,
+    )
+    db_session.add(reminder)
+    db_session.commit()
+    db_session.expire_all()
+
+    with count_select_statements(db_session) as statements:
+        listed = list_reminders(db_session, ReminderListQuery())
+
+    assert listed.total == 1
+    assert listed.items[0].item is not None
+    assert listed.items[0].item.name == "Passport"
+    assert listed.items[0].loan is not None
+    assert listed.items[0].loan.borrower_name == "Taylor"
+    assert len(statements) <= 5
 
 
 def test_search_matches_linked_item_name(db_session: Session, reminder_seed: dict[str, object]) -> None:
