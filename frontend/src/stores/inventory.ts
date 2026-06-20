@@ -32,11 +32,13 @@ import {
 
 interface InventoryState {
   items: ItemSummary[]
+  containerItems: ItemSummary[]
   selectedItem: ItemDetail | null
   total: number
   page: number
   pageSize: number
   loading: boolean
+  containersLoading: boolean
   saving: boolean
   viewMode: 'cards' | 'table'
   filters: ItemFilters
@@ -67,15 +69,18 @@ function isItemDetail(value: unknown): value is ItemDetail {
 }
 
 let loadItemsRequestId = 0
+let loadContainersRequestId = 0
 
 export const useInventoryStore = defineStore('inventory', {
   state: (): InventoryState => ({
     items: [],
+    containerItems: [],
     selectedItem: null,
     total: 0,
     page: 1,
     pageSize: 20,
     loading: false,
+    containersLoading: false,
     saving: false,
     viewMode: 'cards',
     filters: defaultFilters()
@@ -99,6 +104,39 @@ export const useInventoryStore = defineStore('inventory', {
       } finally {
         if (requestId === loadItemsRequestId) {
           this.loading = false
+        }
+      }
+    },
+    async loadContainers() {
+      const requestId = ++loadContainersRequestId
+      const pageSize = 100
+      let page = 1
+      let total = 0
+      const collectedItems: ItemSummary[] = []
+
+      this.containersLoading = true
+      try {
+        do {
+          const response = await listItemsApi({
+            container_only: true,
+            include_archived: false,
+            sort: 'name_asc',
+            page,
+            page_size: pageSize
+          })
+          if (requestId !== loadContainersRequestId) return
+          collectedItems.push(...response.items)
+          total = response.total
+          if (response.items.length === 0) break
+          page += 1
+        } while (collectedItems.length < total)
+
+        this.containerItems = collectedItems
+      } catch (error) {
+        if (requestId === loadContainersRequestId) throw error
+      } finally {
+        if (requestId === loadContainersRequestId) {
+          this.containersLoading = false
         }
       }
     },

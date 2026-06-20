@@ -39,6 +39,8 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const EXIT_STATUS_SEMANTICS = new Set(['removed', 'missing', 'consumed', 'retired', 'lost', 'disposed'])
+
 const activeLoan = computed(() => {
   const loans = props.item?.loans ?? []
   return loans
@@ -62,6 +64,12 @@ const privacyLabel = computed(() => {
   if (level === 'private') return '私密'
   if (level === 'encrypted') return '加密'
   return '普通'
+})
+
+const canMoveItem = computed(() => {
+  const item = props.item
+  if (!item) return false
+  return !EXIT_STATUS_SEMANTICS.has(item.status_semantic)
 })
 
 function updateOpen(open: boolean) {
@@ -157,7 +165,7 @@ function quantityText(row: ItemQuantityChange): string {
             编辑
           </el-button>
           <el-button
-            v-if="canEdit && !item.is_archived"
+            v-if="canEdit && !item.is_archived && canMoveItem"
             :icon="Location"
             @click="emit('move')"
           >

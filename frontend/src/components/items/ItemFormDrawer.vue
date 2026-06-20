@@ -57,6 +57,7 @@ const emit = defineEmits<{
 const configuration = useConfigurationStore()
 const inventory = useInventoryStore()
 const { data } = storeToRefs(configuration)
+const { containerItems, containersLoading } = storeToRefs(inventory)
 
 const activeStep = ref(0)
 const saving = ref(false)
@@ -64,6 +65,7 @@ const placementType = ref<'location' | 'container'>('location')
 const imageFiles = ref<File[]>([])
 const attachmentFiles = ref<File[]>([])
 const attributeValues = ref<Record<number, string>>({})
+const workingItem = ref<ItemDetail | null>(null)
 
 const form = reactive<ItemFormModel>(createEmptyForm())
 
@@ -74,7 +76,8 @@ const privacyOptions = [
   { label: '加密', value: 'encrypted' }
 ]
 
-const isEditing = computed(() => Boolean(props.item?.id))
+const persistedItem = computed(() => workingItem.value ?? props.item ?? null)
+const isEditing = computed(() => Boolean(persistedItem.value?.id))
 const drawerTitle = computed(() => (isEditing.value ? '编辑物品' : '新增物品'))
 const activeStatuses = computed(() =>
   [...(data.value?.item_statuses ?? [])]
@@ -88,7 +91,7 @@ const selectedStatus = computed(() =>
   activeStatuses.value.find((status) => status.id === form.status_id) ?? null
 )
 const placementStatusSemantic = computed(() =>
-  selectedStatus.value?.semantic ?? props.item?.status_semantic ?? ''
+  selectedStatus.value?.semantic ?? persistedItem.value?.status_semantic ?? ''
 )
 const isExitPlacementStatus = computed(() =>
   EXIT_STATUS_SEMANTICS.has(placementStatusSemantic.value)
@@ -125,14 +128,14 @@ const locationOptions = computed<OptionItem[]>(() => {
   )
 })
 const containerOptions = computed<OptionItem[]>(() => {
-  const currentItemId = props.item?.id
-  const options = inventory.items
+  const currentItemId = persistedItem.value?.id
+  const options = containerItems.value
     .filter((item) => item.is_container && !item.is_archived && item.id !== currentItemId)
     .map((item) => ({ label: item.name, value: item.id }))
-  const currentContainerId = props.item?.container_item_id
+  const currentContainerId = persistedItem.value?.container_item_id
   const hasCurrentContainer = options.some((option) => option.value === currentContainerId)
-  if (currentContainerId && props.item?.container_item_name && !hasCurrentContainer) {
-    options.unshift({ label: props.item.container_item_name, value: currentContainerId })
+  if (currentContainerId && persistedItem.value?.container_item_name && !hasCurrentContainer) {
+    options.unshift({ label: persistedItem.value.container_item_name, value: currentContainerId })
   }
   return options
 })
@@ -140,14 +143,18 @@ const containerOptions = computed<OptionItem[]>(() => {
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) resetForm()
+    if (!open) return
+    resetForm()
+    void loadContainerOptions()
   }
 )
 
 watch(
   () => props.item,
   () => {
-    if (props.modelValue) resetForm()
+    if (!props.modelValue) return
+    resetForm()
+    void loadContainerOptions()
   }
 )
 
@@ -212,6 +219,7 @@ function resetForm() {
   activeStep.value = 0
   imageFiles.value = []
   attachmentFiles.value = []
+  workingItem.value = null
 
   if (item) {
     Object.assign(form, {
@@ -374,7 +382,7 @@ function validateRequiredAttributes(requireAttachment: boolean): boolean {
 
 function attachmentNames(): string[] {
   return [
-    ...(props.item?.attachments ?? []).map((attachment) => attachment.original_filename),
+    ...(persistedItem.value?.attachments ?? []).map((attachment) => attachment.original_filename),
     ...attachmentFiles.value.map((file) => file.name)
   ].filter(Boolean)
 }
@@ -427,46 +435,103 @@ function buildUpdatePayload(): ItemUpdateRequest {
 }
 
 function placementChanged(): boolean {
-  if (!props.item || isExitPlacementStatus.value) return false
+  const item = persistedItem.value
+  if (!item || isExitPlacementStatus.value) return false
   return (
-    props.item.location_node_id !== form.location_node_id ||
-    props.item.container_item_id !== form.container_item_id
+    item.location_node_id !== form.location_node_id ||
+    item.container_item_id !== form.container_item_id
   )
 }
 
-async function uploadSelectedFiles(itemId: number) {
-  for (const [index, file] of imageFiles.value.entries()) {
-    const shouldBePrimary = index === 0 && (props.item?.images.length ?? 0) === 0
-    await inventory.uploadImage(itemId, file, shouldBePrimary)
+async function loadContainerOptions() {
+  try {
+    await inventory.loadContainers()
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
   }
-  for (const file of attachmentFiles.value) {
-    await inventory.uploadAttachment(itemId, file)
+}
+
+function removeUploadedImageFile(file: File) {
+  imageFiles.value = imageFiles.value.filter((candidate) => candidate !== file)
+}
+
+function removeUploadedAttachmentFile(file: File) {
+  attachmentFiles.value = attachmentFiles.value.filter((candidate) => candidate !== file)
+}
+
+async function saveBaseItem(): Promise<ItemDetail> {
+  const item = persistedItem.value
+  if (!item) return await inventory.createItem(buildCreatePayload())
+
+  let detail = await inventory.updateItem(item.id, buildUpdatePayload())
+  if (placementChanged()) {
+    detail = await inventory.moveItem(item.id, {
+      location_node_id: form.location_node_id,
+      container_item_id: form.container_item_id,
+      reason: '编辑物品资料'
+    })
   }
+  return detail
+}
+
+async function uploadPendingMedia(item: ItemDetail): Promise<{
+  latestDetail: ItemDetail
+  failedCount: number
+}> {
+  let latestDetail = item
+  let hasImage = latestDetail.images.length > 0
+  let failedCount = 0
+
+  for (const file of [...imageFiles.value]) {
+    try {
+      await inventory.uploadImage(item.id, file, !hasImage)
+      hasImage = true
+      removeUploadedImageFile(file)
+      latestDetail = inventory.selectedItem ?? latestDetail
+    } catch {
+      failedCount += 1
+    }
+  }
+
+  for (const file of [...attachmentFiles.value]) {
+    try {
+      await inventory.uploadAttachment(item.id, file)
+      removeUploadedAttachmentFile(file)
+      latestDetail = inventory.selectedItem ?? latestDetail
+    } catch {
+      failedCount += 1
+    }
+  }
+
+  try {
+    await inventory.openDetail(item.id)
+    latestDetail = inventory.selectedItem ?? latestDetail
+  } catch {
+    // The item has already been saved; keep the latest mutation result if detail refresh fails.
+  }
+
+  return { latestDetail, failedCount }
 }
 
 async function saveItem() {
   if (!validateAll()) return
   saving.value = true
   try {
-    let detail: ItemDetail
-    if (props.item) {
-      detail = await inventory.updateItem(props.item.id, buildUpdatePayload())
-      if (placementChanged()) {
-        detail = await inventory.moveItem(props.item.id, {
-          location_node_id: form.location_node_id,
-          container_item_id: form.container_item_id,
-          reason: '编辑物品资料'
-        })
-      }
-    } else {
-      detail = await inventory.createItem(buildCreatePayload())
+    const wasEditing = isEditing.value
+    const detail = await saveBaseItem()
+    workingItem.value = detail
+
+    const uploadResult = await uploadPendingMedia(detail)
+    workingItem.value = uploadResult.latestDetail
+
+    if (uploadResult.failedCount > 0) {
+      activeStep.value = steps.length - 1
+      ElMessage.warning('物品已保存，部分媒体上传失败，请稍后重试')
+      return
     }
 
-    await uploadSelectedFiles(detail.id)
-    await inventory.openDetail(detail.id)
-    const latestDetail = inventory.selectedItem ?? detail
-    ElMessage.success(isEditing.value ? '已保存' : '已新增')
-    emit('saved', latestDetail)
+    ElMessage.success(wasEditing ? '已保存' : '已新增')
+    emit('saved', uploadResult.latestDetail)
     emit('update:modelValue', false)
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
@@ -538,7 +603,7 @@ function closeDrawer() {
 
           <div class="form-grid">
             <el-form-item label="状态" :required="!isEditing">
-              <el-input v-if="isEditing" :model-value="item?.status_name ?? ''" disabled />
+              <el-input v-if="isEditing" :model-value="persistedItem?.status_name ?? ''" disabled />
               <el-select
                 v-else
                 v-model="form.status_id"
@@ -667,6 +732,7 @@ function closeDrawer() {
                 class="full-width"
                 clearable
                 filterable
+                :loading="containersLoading"
                 placeholder="请选择容器"
               >
                 <el-option
@@ -691,8 +757,8 @@ function closeDrawer() {
           <MediaUploader
             v-model:image-files="imageFiles"
             v-model:attachment-files="attachmentFiles"
-            :images="item?.images ?? []"
-            :attachments="item?.attachments ?? []"
+            :images="persistedItem?.images ?? []"
+            :attachments="persistedItem?.attachments ?? []"
           />
         </section>
       </el-form>

@@ -36,6 +36,7 @@ const emit = defineEmits<{
 const configuration = useConfigurationStore()
 const inventory = useInventoryStore()
 const { data } = storeToRefs(configuration)
+const { containerItems, containersLoading } = storeToRefs(inventory)
 
 const saving = ref(false)
 const movePlacementType = ref<PlacementType>('location')
@@ -135,7 +136,7 @@ const locationOptions = computed<OptionItem[]>(() => {
 
 const containerOptions = computed<OptionItem[]>(() => {
   const currentItemId = props.item?.id
-  const options = inventory.items
+  const options = containerItems.value
     .filter((item) => item.is_container && !item.is_archived && item.id !== currentItemId)
     .map((item) => ({ label: item.name, value: item.id }))
   const currentContainerId = props.item?.container_item_id
@@ -149,21 +150,27 @@ const containerOptions = computed<OptionItem[]>(() => {
 watch(
   () => props.modelValue,
   (open) => {
-    if (open) resetForms()
+    if (!open) return
+    resetForms()
+    void loadContainerOptions()
   }
 )
 
 watch(
   () => props.action,
   () => {
-    if (props.modelValue) resetForms()
+    if (!props.modelValue) return
+    resetForms()
+    void loadContainerOptions()
   }
 )
 
 watch(
   () => props.item,
   () => {
-    if (props.modelValue) resetForms()
+    if (!props.modelValue) return
+    resetForms()
+    void loadContainerOptions()
   }
 )
 
@@ -264,6 +271,14 @@ function flattenLocationNodes(node: LocationNode, prefix: string): OptionItem[] 
 
 function updateOpen(open: boolean) {
   emit('update:modelValue', open)
+}
+
+async function loadContainerOptions() {
+  try {
+    await inventory.loadContainers()
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  }
 }
 
 function validatePlacement(locationNodeId: number | null, containerItemId: number | null): boolean {
@@ -430,6 +445,7 @@ async function submitAction() {
             class="full-width"
             clearable
             filterable
+            :loading="containersLoading"
           >
             <el-option
               v-for="container in containerOptions"
@@ -536,6 +552,7 @@ async function submitAction() {
               class="full-width"
               clearable
               filterable
+              :loading="containersLoading"
             >
               <el-option
                 v-for="container in containerOptions"
