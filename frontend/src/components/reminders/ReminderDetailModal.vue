@@ -10,6 +10,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import type { ReminderDetail, ReminderDueState, ReminderPriority, ReminderSourceType, ReminderStatus } from '../../api/reminders'
+import { formatReminderDate } from '../../utils/reminderDates'
 
 const props = defineProps<{
   modelValue: boolean
@@ -36,13 +37,6 @@ const canEditManual = computed(() => canMutate.value && props.reminder?.source_t
 function updateOpen(open: boolean) {
   emit('update:modelValue', open)
   if (!open) emit('close')
-}
-
-function formatDate(value?: string | null): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('zh-CN')
 }
 
 function formatDateTime(value?: string | null): string {
@@ -216,13 +210,13 @@ function priorityTagType(value?: ReminderPriority): 'danger' | 'warning' | 'info
           <el-descriptions-item label="状态">
             {{ statusLabel(reminder.status) }}
           </el-descriptions-item>
-          <el-descriptions-item label="提醒日期">{{ formatDateTime(reminder.remind_at) }}</el-descriptions-item>
-          <el-descriptions-item label="到期日期">{{ formatDate(reminder.due_date) }}</el-descriptions-item>
+          <el-descriptions-item label="提醒日期">{{ formatReminderDate(reminder.remind_at) }}</el-descriptions-item>
+          <el-descriptions-item label="到期日期">{{ formatReminderDate(reminder.due_date) }}</el-descriptions-item>
           <el-descriptions-item label="借用人">
             {{ reminder.loan?.borrower_name || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="预计归还">
-            {{ formatDate(reminder.loan?.expected_return_date) }}
+            {{ formatReminderDate(reminder.loan?.expected_return_date) }}
           </el-descriptions-item>
           <el-descriptions-item label="更新时间">{{ formatDateTime(reminder.updated_at) }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ formatDateTime(reminder.created_at) }}</el-descriptions-item>

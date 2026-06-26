@@ -20,6 +20,7 @@ import ReminderDetailModal from '../components/reminders/ReminderDetailModal.vue
 import ReminderFormDialog from '../components/reminders/ReminderFormDialog.vue'
 import { useAuthStore } from '../stores/auth'
 import { useReminderStore } from '../stores/reminders'
+import { formatReminderDate } from '../utils/reminderDates'
 
 const auth = useAuthStore()
 const reminders = useReminderStore()
@@ -246,13 +247,6 @@ function priorityTagType(value: ReminderPriority): 'danger' | 'warning' | 'info'
   return 'warning'
 }
 
-function formatDate(value?: string | null): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString('zh-CN')
-}
-
 function formatDateTime(value?: string | null): string {
   if (!value) return '-'
   const date = new Date(value)
@@ -360,7 +354,7 @@ function itemName(row: ReminderSummary): string {
           </template>
         </el-table-column>
         <el-table-column label="到期日期" width="130">
-          <template #default="{ row }">{{ formatDate(row.due_date) }}</template>
+          <template #default="{ row }">{{ formatReminderDate(row.due_date) }}</template>
         </el-table-column>
         <el-table-column label="优先级" width="100">
           <template #default="{ row }">

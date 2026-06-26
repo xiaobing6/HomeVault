@@ -8,6 +8,7 @@ import type {
   ReminderPriority,
   ReminderUpdateRequest
 } from '../../api/reminders'
+import { normalizeReminderDate } from '../../utils/reminderDates'
 
 const props = defineProps<{
   modelValue: boolean
@@ -69,18 +70,14 @@ function resetForm() {
   form.title = reminder?.title ?? ''
   form.description = reminder?.description ?? ''
   form.item_id = reminder?.item_id ?? null
-  form.due_date = reminder?.due_date ?? null
-  form.remind_at = reminder?.remind_at ?? null
+  form.due_date = normalizeReminderDate(reminder?.due_date)
+  form.remind_at = normalizeReminderDate(reminder?.remind_at)
   form.priority = reminder?.priority ?? 'normal'
   formRef.value?.clearValidate()
 }
 
 function updateOpen(open: boolean) {
   emit('update:modelValue', open)
-}
-
-function nullableString(value: string | null): string | null {
-  return value && value.trim() ? value : null
 }
 
 async function submitForm() {
@@ -91,8 +88,8 @@ async function submitForm() {
     title: form.title.trim(),
     description: form.description.trim(),
     item_id: form.item_id ?? null,
-    due_date: nullableString(form.due_date),
-    remind_at: nullableString(form.remind_at),
+    due_date: normalizeReminderDate(form.due_date),
+    remind_at: normalizeReminderDate(form.remind_at),
     priority: form.priority
   })
 }
@@ -164,9 +161,9 @@ async function submitForm() {
           <el-date-picker
             v-model="form.remind_at"
             class="full-control"
-            type="datetime"
-            value-format="YYYY-MM-DDTHH:mm:ss"
-            placeholder="选择提醒时间"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="选择提醒日期"
             clearable
           />
         </el-form-item>
