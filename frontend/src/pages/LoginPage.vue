@@ -33,7 +33,7 @@ async function submit() {
       <div class="login-copy">
         <p class="eyebrow">HomeVault</p>
         <h1>把家里的东西安稳地记下来</h1>
-        <p>登录后可以查看家庭物品、位置、角色权限和后续管理功能。</p>
+        <p>登录后可以管理家庭物品、位置、角色权限和提醒中心。</p>
       </div>
       <el-form class="login-form" @submit.prevent="submit">
         <el-form-item>

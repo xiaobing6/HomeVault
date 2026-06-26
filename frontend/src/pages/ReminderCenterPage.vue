@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Bell, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 
 import { getChineseErrorMessage } from '../api/client'
 import type {
@@ -24,6 +25,7 @@ import { formatReminderDate } from '../utils/reminderDates'
 
 const auth = useAuthStore()
 const reminders = useReminderStore()
+const router = useRouter()
 const { loading, saving, selectedReminder, total, page, pageSize } = storeToRefs(reminders)
 
 const detailOpen = ref(false)
@@ -190,10 +192,16 @@ async function runLifecycleAction(
     if (action === 'archive') await reminders.archiveReminder(reminder.id)
 
     ElMessage.success(successMessage)
+    if (action === 'archive') closeDetail()
   } catch (error) {
     if (error === 'cancel') return
     ElMessage.error(getChineseErrorMessage(error))
   }
+}
+
+async function openLinkedItem(itemId: number) {
+  closeDetail()
+  await router.push({ name: 'items', query: { item_id: String(itemId) } })
 }
 
 function closeDetail() {
@@ -405,6 +413,7 @@ function itemName(row: ReminderSummary): string {
       @dismiss="runLifecycleAction('dismiss', '提醒已忽略')"
       @reopen="runLifecycleAction('reopen', '提醒已重新打开')"
       @archive="runLifecycleAction('archive', '提醒已归档')"
+      @open-item="openLinkedItem"
       @close="closeDetail"
     />
 

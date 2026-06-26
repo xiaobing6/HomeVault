@@ -5,13 +5,13 @@ import { Bell, Box, Key, UserFilled } from '@element-plus/icons-vue'
 <template>
   <section>
     <h1 class="page-title">仪表盘</h1>
-    <p class="page-subtitle">第一阶段先确认登录、权限和基础布局，物品统计会在库存模块接入后显示真实数据。</p>
+    <p class="page-subtitle">集中查看家庭物品、位置、权限和提醒入口，后续阶段会继续补齐审计、管理和批量能力。</p>
 
     <div class="summary-grid">
       <el-card shadow="never">
         <el-icon><Box /></el-icon>
         <strong>物品基础</strong>
-        <span>准备接入住宅、位置和物品卡片</span>
+        <span>查看住宅、位置、分类和物品清单</span>
       </el-card>
       <el-card shadow="never">
         <el-icon><UserFilled /></el-icon>
@@ -21,7 +21,7 @@ import { Bell, Box, Key, UserFilled } from '@element-plus/icons-vue'
       <el-card shadow="never">
         <el-icon><Bell /></el-icon>
         <strong>站内提醒</strong>
-        <span>后续展示保修、有效期和检查提醒</span>
+        <span>查看待处理、即将到期和已逾期提醒</span>
       </el-card>
       <el-card shadow="never">
         <el-icon><Key /></el-icon>

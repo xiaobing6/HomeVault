@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 
 import { getChineseErrorMessage } from '../api/client'
 import type { ItemDetail, ItemLoan } from '../api/inventory'
@@ -21,6 +22,7 @@ type ItemActionType = 'move' | 'status' | 'borrow' | 'return' | 'quantity' | 'ar
 const auth = useAuthStore()
 const configuration = useConfigurationStore()
 const inventory = useInventoryStore()
+const route = useRoute()
 const { items, loading, selectedItem, total, page, pageSize, viewMode } = storeToRefs(inventory)
 
 const canCreate = computed(() => auth.hasPermission('items:create'))
@@ -48,10 +50,18 @@ const sortValue = computed({
 onMounted(async () => {
   try {
     await Promise.all([configuration.load(), inventory.loadItems()])
+    await openRouteItemDetail()
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }
 })
+
+watch(
+  () => route.query.item_id,
+  () => {
+    void openRouteItemDetail()
+  }
+)
 
 async function applyAndLoad(filters: Parameters<typeof inventory.applyFilters>[0]) {
   try {
@@ -91,6 +101,20 @@ async function openDetail(itemId: number) {
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }
+}
+
+function routeItemId(): number | null {
+  const rawItemId = Array.isArray(route.query.item_id) ? route.query.item_id[0] : route.query.item_id
+  if (!rawItemId) return null
+
+  const itemId = Number(rawItemId)
+  return Number.isInteger(itemId) && itemId > 0 ? itemId : null
+}
+
+async function openRouteItemDetail() {
+  const itemId = routeItemId()
+  if (!itemId) return
+  await openDetail(itemId)
 }
 
 function openCreateDrawer() {

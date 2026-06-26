@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import {
   Bell,
+  Box,
   Check,
   CloseBold,
   Delete,
@@ -27,6 +28,7 @@ const emit = defineEmits<{
   dismiss: []
   reopen: []
   archive: []
+  'open-item': [itemId: number]
   close: []
 }>()
 
@@ -204,7 +206,17 @@ function priorityTagType(value?: ReminderPriority): 'danger' | 'warning' | 'info
         <el-descriptions :column="2" border>
           <el-descriptions-item label="标题">{{ reminder.title }}</el-descriptions-item>
           <el-descriptions-item label="关联物品">
-            {{ reminder.item?.name || '-' }}
+            <el-button
+              v-if="reminder.item_id"
+              class="linked-item-button"
+              link
+              type="primary"
+              :icon="Box"
+              @click="emit('open-item', reminder.item_id)"
+            >
+              {{ reminder.item?.name || `物品 #${reminder.item_id}` }}
+            </el-button>
+            <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="来源">{{ sourceLabel(reminder.source_type) }}</el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -259,6 +271,11 @@ function priorityTagType(value?: ReminderPriority): 'danger' | 'warning' | 'info
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.linked-item-button {
+  min-height: 0;
+  padding: 0;
 }
 
 .loan-note {
