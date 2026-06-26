@@ -13,6 +13,10 @@ import {
   type ReminderListResponse,
   type ReminderUpdateRequest
 } from '../src/api/reminders'
+import ReminderDetailModal from '../src/components/reminders/ReminderDetailModal.vue'
+import ReminderFormDialog from '../src/components/reminders/ReminderFormDialog.vue'
+import ReminderCenterPage from '../src/pages/ReminderCenterPage.vue'
+import { router } from '../src/router'
 import { useReminderStore } from '../src/stores/reminders'
 
 function expectType<T>(_value: T): void {}
@@ -85,3 +89,15 @@ async function assertReminderStoreContract() {
 
 void assertReminderApiContract
 void assertReminderStoreContract
+
+function assertReminderUiContract() {
+  expectType<object>(ReminderDetailModal)
+  expectType<object>(ReminderFormDialog)
+  expectType<object>(ReminderCenterPage)
+
+  const reminderRoute = router.resolve('/reminders')
+  expectType<string | symbol | null | undefined>(reminderRoute.name)
+  expectType<unknown>(reminderRoute.meta.permission)
+}
+
+void assertReminderUiContract

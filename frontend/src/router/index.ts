@@ -17,6 +17,12 @@ const routes: RouteRecordRaw[] = [
         meta: { permission: 'items:view' }
       },
       {
+        path: 'reminders',
+        name: 'reminders',
+        component: () => import('../pages/ReminderCenterPage.vue'),
+        meta: { permission: 'items:view' }
+      },
+      {
         path: 'admin/config',
         name: 'core-config',
         component: () => import('../pages/CoreConfigPage.vue'),
