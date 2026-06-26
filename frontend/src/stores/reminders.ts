@@ -31,6 +31,7 @@ const defaultFilters = (): ReminderFilters => ({
   page: 1,
   page_size: 20,
   sort: 'due_asc',
+  status: 'pending',
   include_archived: false
 })
 

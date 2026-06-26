@@ -14,7 +14,7 @@ class RequestModel(BaseModel):
 
 
 class ReminderListQuery(RequestModel):
-    status: str | None = None
+    status: str | None = "pending"
     source_type: str | None = None
     item_id: int | None = None
     loan_id: int | None = None

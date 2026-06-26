@@ -105,6 +105,29 @@ def test_create_list_update_complete_dismiss_reopen_and_archive_reminder(
     assert archived.archived_at is not None
 
 
+def test_default_reminder_list_shows_only_pending_status(
+    db_session: Session,
+    reminder_seed: dict[str, object],
+) -> None:
+    item = reminder_seed["item"]
+    pending = create_reminder(db_session, ReminderCreate(title="Pending", item_id=item.id), actor_id=10)
+    done = create_reminder(db_session, ReminderCreate(title="Done", item_id=item.id), actor_id=10)
+    dismissed = create_reminder(db_session, ReminderCreate(title="Dismissed", item_id=item.id), actor_id=10)
+    complete_reminder(db_session, done.id, actor_id=10)
+    dismiss_reminder(db_session, dismissed.id, actor_id=10)
+
+    default_list = list_reminders(db_session, ReminderListQuery())
+    done_list = list_reminders(db_session, ReminderListQuery(status="done"))
+    dismissed_list = list_reminders(db_session, ReminderListQuery(status="dismissed"))
+
+    assert default_list.total == 1
+    assert default_list.items[0].id == pending.id
+    assert done_list.total == 1
+    assert done_list.items[0].id == done.id
+    assert dismissed_list.total == 1
+    assert dismissed_list.items[0].id == dismissed.id
+
+
 def test_overdue_filter_uses_fixed_service_date(
     db_session: Session,
     reminder_seed: dict[str, object],
