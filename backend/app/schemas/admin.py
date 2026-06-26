@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.errors import bad_request
 
 
 class AdminUserListQuery(BaseModel):
@@ -17,13 +19,27 @@ class AdminUserCreate(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     display_name: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=8, max_length=200)
-    role_codes: list[str] = Field(default_factory=list)
+    role_codes: list[str] = Field(min_length=1)
+
+    @field_validator("role_codes", mode="before")
+    @classmethod
+    def ensure_role_codes_present(cls, value: object) -> object:
+        if isinstance(value, list) and not value:
+            raise bad_request("用户至少需要一个角色")
+        return value
 
 
 class AdminUserUpdate(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     is_active: bool
-    role_codes: list[str] = Field(default_factory=list)
+    role_codes: list[str] = Field(min_length=1)
+
+    @field_validator("role_codes", mode="before")
+    @classmethod
+    def ensure_role_codes_present(cls, value: object) -> object:
+        if isinstance(value, list) and not value:
+            raise bad_request("用户至少需要一个角色")
+        return value
 
 
 class AdminPasswordReset(BaseModel):
@@ -33,7 +49,6 @@ class AdminPasswordReset(BaseModel):
 class AdminPermissionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
     code: str
     name: str
     description: str
@@ -45,7 +60,7 @@ class AdminRoleResponse(BaseModel):
     name: str
     description: str
     is_system: bool
-    permissions: list[str] = Field(default_factory=list)
+    permissions: list[AdminPermissionResponse] = Field(default_factory=list)
 
 
 class AdminUserResponse(BaseModel):

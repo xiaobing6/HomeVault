@@ -9,6 +9,7 @@ from app.core.security import hash_password
 from app.models.auth import Role, User
 from app.schemas.admin import (
     AdminPasswordReset,
+    AdminPermissionResponse,
     AdminRoleResponse,
     AdminUserCreate,
     AdminUserListQuery,
@@ -46,7 +47,10 @@ def serialize_admin_role(role: Role) -> AdminRoleResponse:
         name=role.name,
         description=role.description,
         is_system=role.is_system,
-        permissions=sorted({permission.code for permission in role.permissions}),
+        permissions=[
+            AdminPermissionResponse.model_validate(permission)
+            for permission in sorted(role.permissions, key=lambda item: item.code)
+        ],
     )
 
 
@@ -59,10 +63,15 @@ def list_roles(db: Session) -> list[AdminRoleResponse]:
     return [serialize_admin_role(role) for role in roles]
 
 
-def role_map_by_code(db: Session, role_codes: list[str]) -> dict[str, Role]:
-    unique_codes = sorted(set(role_codes))
+def normalize_role_codes(role_codes: list[str]) -> list[str]:
+    unique_codes = sorted({role_code.strip() for role_code in role_codes if role_code.strip()})
     if not unique_codes:
         raise bad_request("用户至少需要一个角色")
+    return unique_codes
+
+
+def role_map_by_code(db: Session, role_codes: list[str]) -> dict[str, Role]:
+    unique_codes = normalize_role_codes(role_codes)
 
     roles = db.scalars(
         select(Role)
@@ -93,7 +102,7 @@ def assert_not_last_active_admin(
     next_role_codes: list[str],
 ) -> None:
     is_current_active_admin = user.is_active and any(role.code == "admin" for role in user.roles)
-    is_next_active_admin = next_is_active and "admin" in set(next_role_codes)
+    is_next_active_admin = next_is_active and "admin" in set(normalize_role_codes(next_role_codes))
     if is_current_active_admin and not is_next_active_admin and active_admin_count(db, user.id) == 0:
         raise bad_request("至少保留一个启用的管理员")
 
@@ -169,11 +178,12 @@ def get_user_for_admin(db: Session, user_id: int) -> User:
 def update_user(db: Session, user_id: int, payload: AdminUserUpdate) -> AdminUserResponse:
     user = get_user_for_admin(db, user_id)
     roles_by_code = role_map_by_code(db, payload.role_codes)
-    assert_not_last_active_admin(db, user, payload.is_active, payload.role_codes)
+    normalized_role_codes = sorted(roles_by_code)
+    assert_not_last_active_admin(db, user, payload.is_active, normalized_role_codes)
 
     user.display_name = payload.display_name
     user.is_active = payload.is_active
-    user.roles = [roles_by_code[code] for code in sorted(roles_by_code)]
+    user.roles = [roles_by_code[code] for code in normalized_role_codes]
     db.commit()
     db.refresh(user)
     return serialize_admin_user(user)

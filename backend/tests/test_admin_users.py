@@ -40,6 +40,9 @@ def test_admin_can_list_roles_create_update_and_reset_user(
     roles = client.get("/api/admin/roles", headers=headers)
     assert roles.status_code == 200
     assert {role["code"] for role in roles.json()} == {"admin", "editor", "viewer"}
+    admin_role = next(role for role in roles.json() if role["code"] == "admin")
+    assert all(set(permission) == {"code", "name", "description"} for permission in admin_role["permissions"])
+    assert "users:manage" in {permission["code"] for permission in admin_role["permissions"]}
 
     created = client.post(
         "/api/admin/users",
@@ -48,7 +51,7 @@ def test_admin_can_list_roles_create_update_and_reset_user(
             "username": "manager",
             "display_name": "Manager",
             "password": "Manager123!",
-            "role_codes": ["editor"],
+            "role_codes": [" editor ", "editor"],
         },
     )
     assert created.status_code == 201
@@ -86,21 +89,23 @@ def test_admin_can_list_roles_create_update_and_reset_user(
 
 def test_user_management_rejects_viewer_and_editor(client: TestClient) -> None:
     admin_headers = login(client)
-    client.post(
-        "/api/admin/users",
-        headers=admin_headers,
-        json={
-            "username": "viewer",
-            "display_name": "Viewer",
-            "password": "Viewer123!",
-            "role_codes": ["viewer"],
-        },
-    )
-    viewer_headers = login(client, "viewer", "Viewer123!")
+    for username, role_code in [("viewer", "viewer"), ("editor", "editor")]:
+        created = client.post(
+            "/api/admin/users",
+            headers=admin_headers,
+            json={
+                "username": username,
+                "display_name": username.title(),
+                "password": f"{username.title()}123!",
+                "role_codes": [role_code],
+            },
+        )
+        assert created.status_code == 201
+        headers = login(client, username, f"{username.title()}123!")
 
-    response = client.get("/api/admin/users", headers=viewer_headers)
-    assert response.status_code == 403
-    assert response.json()["message"] == "你没有权限执行此操作"
+        response = client.get("/api/admin/users", headers=headers)
+        assert response.status_code == 403
+        assert response.json()["message"] == "你没有权限执行此操作"
 
 
 def test_user_management_prevents_last_active_admin_lockout(client: TestClient) -> None:
@@ -140,6 +145,19 @@ def test_user_management_rejects_bad_roles_and_duplicate_username(client: TestCl
     )
     assert empty_roles.status_code == 400
     assert empty_roles.json()["message"] == "用户至少需要一个角色"
+
+    blank_roles = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "blankroles",
+            "display_name": "Blank Roles",
+            "password": "Blank123!",
+            "role_codes": ["   "],
+        },
+    )
+    assert blank_roles.status_code == 400
+    assert blank_roles.json()["message"] == "用户至少需要一个角色"
 
     bad_role = client.post(
         "/api/admin/users",
