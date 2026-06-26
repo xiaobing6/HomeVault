@@ -13,6 +13,7 @@ import {
   type ReminderListResponse,
   type ReminderUpdateRequest
 } from '../src/api/reminders'
+import type { ItemFilters } from '../src/api/inventory'
 import ReminderDetailModal from '../src/components/reminders/ReminderDetailModal.vue'
 import ReminderFormDialog from '../src/components/reminders/ReminderFormDialog.vue'
 import ReminderCenterPage from '../src/pages/ReminderCenterPage.vue'
@@ -101,3 +102,16 @@ function assertReminderUiContract() {
 }
 
 void assertReminderUiContract
+
+function assertItemReminderFilterContract() {
+  const filters: ItemFilters = {
+    has_pending_reminder: true,
+    has_upcoming_reminder: true,
+    has_overdue_reminder: true,
+    reminder_upcoming_days: 7
+  }
+
+  expectType<ItemFilters>(filters)
+}
+
+void assertItemReminderFilterContract

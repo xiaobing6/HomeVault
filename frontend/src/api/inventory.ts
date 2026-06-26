@@ -160,6 +160,10 @@ export interface ItemFilters {
   status_id?: number | null
   tag?: string | null
   is_on_loan?: boolean | null
+  has_pending_reminder?: boolean | null
+  has_upcoming_reminder?: boolean | null
+  has_overdue_reminder?: boolean | null
+  reminder_upcoming_days?: number
   include_archived?: boolean
   owner_member_id?: number | null
   keeper_member_id?: number | null

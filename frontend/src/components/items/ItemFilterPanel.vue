@@ -35,12 +35,19 @@ const categorySelectedKey = computed(() =>
 const quickFilters = computed({
   get: () => [
     ...(inventory.filters.is_on_loan ? ['loan'] : []),
+    ...(inventory.filters.has_pending_reminder ? ['reminder-pending'] : []),
+    ...(inventory.filters.has_upcoming_reminder ? ['reminder-upcoming'] : []),
+    ...(inventory.filters.has_overdue_reminder ? ['reminder-overdue'] : []),
     ...(inventory.filters.container_only ? ['container'] : []),
     ...(inventory.filters.include_archived ? ['archived'] : [])
   ],
   set: (values: string[]) => {
     void applyFilters({
       is_on_loan: values.includes('loan') ? true : null,
+      has_pending_reminder: values.includes('reminder-pending') ? true : null,
+      has_upcoming_reminder: values.includes('reminder-upcoming') ? true : null,
+      has_overdue_reminder: values.includes('reminder-overdue') ? true : null,
+      reminder_upcoming_days: 7,
       container_only: values.includes('container') ? true : null,
       include_archived: values.includes('archived')
     })
@@ -172,6 +179,9 @@ async function resetFilters() {
       </div>
       <el-checkbox-group v-model="quickFilters" class="quick-filters">
         <el-checkbox-button label="loan">借出未归还</el-checkbox-button>
+        <el-checkbox-button label="reminder-pending">有待处理提醒</el-checkbox-button>
+        <el-checkbox-button label="reminder-upcoming">即将到期</el-checkbox-button>
+        <el-checkbox-button label="reminder-overdue">已逾期</el-checkbox-button>
         <el-checkbox-button label="container">容器物品</el-checkbox-button>
         <el-checkbox-button label="archived">已归档</el-checkbox-button>
       </el-checkbox-group>
