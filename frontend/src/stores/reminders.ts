@@ -41,6 +41,7 @@ function hasNonPaginationFilter(filters: ReminderFilters): boolean {
 }
 
 let loadRemindersRequestId = 0
+let loadReminderDetailRequestId = 0
 
 export const useReminderStore = defineStore('reminders', {
   state: (): RemindersState => ({
@@ -81,11 +82,16 @@ export const useReminderStore = defineStore('reminders', {
       }
     },
     async openDetail(reminderId: number) {
+      const requestId = ++loadReminderDetailRequestId
       this.loading = true
       try {
-        this.selectedReminder = await fetchReminderDetailApi(reminderId)
+        const detail = await fetchReminderDetailApi(reminderId)
+        if (requestId !== loadReminderDetailRequestId) return
+        this.selectedReminder = detail
       } finally {
-        this.loading = false
+        if (requestId === loadReminderDetailRequestId) {
+          this.loading = false
+        }
       }
     },
     applyFilters(filters: ReminderFilters) {
