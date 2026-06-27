@@ -2,12 +2,13 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.core.security import verify_password
 from app.main import app
-from app.models.auth import User
+from app.models.auth import AuthSession, User
 from app.services.seed import seed_auth_baseline
 
 
@@ -92,6 +93,125 @@ def test_admin_can_list_roles_create_update_and_reset_user(
     saved = db_session.get(User, user_id)
     assert saved is not None
     assert verify_password("NewManager123!", saved.password_hash)
+
+
+def test_admin_password_reset_revokes_existing_target_sessions(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin_headers = login(client)
+    created = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={
+            "username": "resetme",
+            "display_name": "Reset Me",
+            "password": "ResetMe123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert created.status_code == 201
+    user_id = created.json()["id"]
+    target_headers = login(client, "resetme", "ResetMe123!")
+
+    reset = client.post(
+        f"/api/admin/users/{user_id}/reset-password",
+        headers=admin_headers,
+        json={"password": "NewResetMe123!"},
+    )
+    assert reset.status_code == 200
+
+    stale_me = client.get("/api/auth/me", headers=target_headers)
+    assert stale_me.status_code == 401
+
+    sessions = db_session.scalars(select(AuthSession).where(AuthSession.user_id == user_id)).all()
+    assert sessions
+    assert all(not session.is_active and session.revoked_at is not None for session in sessions)
+    login(client, "resetme", "NewResetMe123!")
+
+
+def test_admin_user_requests_strip_whitespace_before_storage_and_filtering(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+
+    created = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": " manager ",
+            "display_name": " Manager ",
+            "password": "Manager123!",
+            "role_codes": [" editor "],
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["username"] == "manager"
+    assert body["display_name"] == "Manager"
+    assert body["roles"] == ["editor"]
+
+    saved = db_session.get(User, body["id"])
+    assert saved is not None
+    assert saved.username == "manager"
+    assert saved.display_name == "Manager"
+
+    listed = client.get(
+        "/api/admin/users",
+        headers=headers,
+        params={"search": " manager ", "role": " editor "},
+    )
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert listed.json()["items"][0]["username"] == "manager"
+
+
+def test_admin_user_requests_reject_blank_names_after_trimming(client: TestClient) -> None:
+    headers = login(client)
+
+    blank_username = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "   ",
+            "display_name": "Blank Username",
+            "password": "BlankUser123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert blank_username.status_code == 422
+
+    blank_display_name = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "blankdisplay",
+            "display_name": "   ",
+            "password": "BlankDisplay123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert blank_display_name.status_code == 422
+
+    created = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "blankupdate",
+            "display_name": "Blank Update",
+            "password": "BlankUpdate123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert created.status_code == 201
+
+    blank_update = client.patch(
+        f"/api/admin/users/{created.json()['id']}",
+        headers=headers,
+        json={"display_name": "   ", "is_active": True, "role_codes": ["viewer"]},
+    )
+    assert blank_update.status_code == 422
 
 
 def test_user_management_rejects_viewer_and_editor(client: TestClient) -> None:

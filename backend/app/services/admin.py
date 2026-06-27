@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import bad_request, not_found
 from app.core.security import hash_password
-from app.models.auth import Role, User
+from app.models.auth import AuthSession, Role, User
 from app.schemas.admin import (
     AdminPasswordReset,
     AdminPermissionResponse,
@@ -192,6 +194,16 @@ def update_user(db: Session, user_id: int, payload: AdminUserUpdate) -> AdminUse
 def reset_user_password(db: Session, user_id: int, payload: AdminPasswordReset) -> AdminUserResponse:
     user = get_user_for_admin(db, user_id)
     user.password_hash = hash_password(payload.password)
+    revoked_at = datetime.now(timezone.utc)
+    sessions = db.scalars(
+        select(AuthSession).where(
+            AuthSession.user_id == user.id,
+            AuthSession.is_active.is_(True),
+        )
+    ).all()
+    for session in sessions:
+        session.is_active = False
+        session.revoked_at = revoked_at
     db.commit()
     db.refresh(user)
     return serialize_admin_user(user)
