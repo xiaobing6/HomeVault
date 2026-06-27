@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, Box, House, Setting, SwitchButton } from '@element-plus/icons-vue'
+import { Bell, Box, House, Setting, SwitchButton, UserFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -50,6 +50,12 @@ async function handleLogout() {
           <el-menu-item index="/reminders">
             <el-icon><Bell /></el-icon>
             <span>提醒</span>
+          </el-menu-item>
+        </PermissionGate>
+        <PermissionGate permission="users:manage">
+          <el-menu-item index="/admin/users">
+            <el-icon><UserFilled /></el-icon>
+            <span>用户</span>
           </el-menu-item>
         </PermissionGate>
         <PermissionGate permission="config:manage">

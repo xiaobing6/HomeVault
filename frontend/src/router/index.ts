@@ -23,6 +23,12 @@ const routes: RouteRecordRaw[] = [
         meta: { permission: 'items:view' }
       },
       {
+        path: 'admin/users',
+        name: 'admin-users',
+        component: () => import('../pages/AdminUsersPage.vue'),
+        meta: { permission: 'users:manage' }
+      },
+      {
         path: 'admin/config',
         name: 'core-config',
         component: () => import('../pages/CoreConfigPage.vue'),
