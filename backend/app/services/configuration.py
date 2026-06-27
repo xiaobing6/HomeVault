@@ -68,6 +68,8 @@ CORE_DICTIONARY_GROUPS = [
     ("storage_conditions", "存放条件"),
 ]
 
+ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE = "启用住宅名称已存在"
+
 
 def commit_or_bad_request(db: Session, message: str) -> None:
     try:
@@ -284,6 +286,23 @@ def assert_location_parent_valid(
             raise bad_request("位置上级节点不合法")
 
 
+def assert_active_residence_name_available(
+    db: Session,
+    name: str,
+    current_id: int | None = None,
+) -> None:
+    statement = select(Residence).where(
+        Residence.name == name,
+        Residence.is_active.is_(True),
+    )
+    if current_id is not None:
+        statement = statement.where(Residence.id != current_id)
+
+    existing = db.scalar(statement)
+    if existing is not None:
+        raise bad_request(ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
+
+
 def assert_category_parent_valid(
     db: Session,
     parent_id: int | None,
@@ -358,13 +377,11 @@ def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
 
 
 def create_residence(db: Session, payload: ResidenceCreate) -> ResidenceResponse:
-    home_space = get_or_create_home_space(db)
-    existing = db.scalar(select(Residence).where(Residence.name == payload.name))
-    if existing is not None:
-        raise bad_request("住宅名称已存在")
+    seed = ensure_core_configuration_seed(db)
+    assert_active_residence_name_available(db, payload.name)
 
     residence = Residence(
-        home_space_id=home_space.id,
+        home_space_id=seed.home_space.id,
         name=payload.name,
         description=payload.description,
         address=payload.address,
@@ -372,7 +389,7 @@ def create_residence(db: Session, payload: ResidenceCreate) -> ResidenceResponse
         is_active=True,
     )
     db.add(residence)
-    commit_or_bad_request(db, "住宅名称已存在")
+    commit_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
     db.refresh(residence)
     return ResidenceResponse.model_validate(residence)
 
@@ -485,21 +502,15 @@ def update_residence(db: Session, residence_id: int, payload: ResidenceUpdate) -
     if residence is None:
         raise bad_request("Residence not found")
 
-    existing = db.scalar(
-        select(Residence).where(
-            Residence.name == payload.name,
-            Residence.id != residence_id,
-        )
-    )
-    if existing is not None:
-        raise bad_request("Residence name already exists")
+    if payload.is_active:
+        assert_active_residence_name_available(db, payload.name, current_id=residence_id)
 
     residence.name = payload.name
     residence.description = payload.description
     residence.address = payload.address
     residence.sort_order = payload.sort_order
     residence.is_active = payload.is_active
-    commit_or_bad_request(db, "Residence name already exists")
+    commit_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
     db.refresh(residence)
     return ResidenceResponse.model_validate(residence)
 

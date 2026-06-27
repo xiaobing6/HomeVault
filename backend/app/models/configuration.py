@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -41,10 +41,19 @@ class HomeSpace(Base):
 
 class Residence(Base):
     __tablename__ = "residences"
+    __table_args__ = (
+        Index(
+            "uq_residences_active_name",
+            "name",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active = true"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     home_space_id: Mapped[int] = mapped_column(ForeignKey("home_spaces.id", ondelete="CASCADE"), nullable=False)
-    name: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     address: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

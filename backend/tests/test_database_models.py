@@ -228,3 +228,28 @@ def test_inventory_partial_unique_index_guard_migration_exists(tmp_path: Path) -
         assert revision.down_revision == "20260619_0003"
     finally:
         restore_alembic_database_url(cfg)
+
+
+def test_residence_active_unique_index_migration_exists_and_upgrades(tmp_path: Path) -> None:
+    db_path = tmp_path / "residence_active_unique.sqlite3"
+    cfg = alembic_config(str(db_path))
+
+    try:
+        script = ScriptDirectory.from_config(cfg)
+        revision = script.get_revision("20260627_0006")
+
+        assert revision is not None
+        assert revision.down_revision == "20260620_0005"
+
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            residence_indexes = {index["name"] for index in inspect(engine).get_indexes("residences")}
+        finally:
+            engine.dispose()
+
+        assert "ix_residences_name" in residence_indexes
+        assert "uq_residences_active_name" in residence_indexes
+    finally:
+        restore_alembic_database_url(cfg)

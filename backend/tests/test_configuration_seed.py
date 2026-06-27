@@ -16,6 +16,7 @@ from app.schemas.configuration import (
     CategoryCreate,
     LocationNodeCreate,
     ResidenceCreate,
+    ResidenceUpdate,
 )
 from app.services.configuration import (
     assert_category_parent_valid,
@@ -26,6 +27,7 @@ from app.services.configuration import (
     create_residence,
     ensure_core_configuration_seed,
     get_config_bootstrap,
+    update_residence,
 )
 
 
@@ -86,7 +88,7 @@ def test_create_residence_rejects_duplicate_name(db_session: Session) -> None:
     with pytest.raises(HTTPException) as exc_info:
         create_residence(db_session, payload)
 
-    assert_bad_request_message(exc_info, "住宅名称已存在")
+    assert_bad_request_message(exc_info, "启用住宅名称已存在")
 
 
 def test_create_residence_rolls_back_commit_time_duplicate_name(db_session: Session) -> None:
@@ -96,8 +98,44 @@ def test_create_residence_rolls_back_commit_time_duplicate_name(db_session: Sess
     with pytest.raises(HTTPException) as exc_info:
         create_residence(db_session, ResidenceCreate(name="主住宅"))
 
-    assert_bad_request_message(exc_info, "住宅名称已存在")
+    assert_bad_request_message(exc_info, "启用住宅名称已存在")
     assert db_session.scalar(select(HomeSpace).where(HomeSpace.id == seed.home_space.id)) is not None
+
+
+def test_inactive_residence_name_can_be_reused(db_session: Session) -> None:
+    first = create_residence(db_session, ResidenceCreate(name="主住宅"))
+
+    update_residence(
+        db_session,
+        first.id,
+        ResidenceUpdate(name="主住宅", is_active=False),
+    )
+    second = create_residence(db_session, ResidenceCreate(name="主住宅"))
+
+    assert second.id != first.id
+    assert second.is_active is True
+
+
+def test_active_residence_name_conflict_is_rejected_on_create_and_reactivate(db_session: Session) -> None:
+    active = create_residence(db_session, ResidenceCreate(name="主住宅"))
+    inactive = create_residence(db_session, ResidenceCreate(name="备用住宅"))
+    update_residence(
+        db_session,
+        inactive.id,
+        ResidenceUpdate(name="备用住宅", is_active=False),
+    )
+
+    with pytest.raises(HTTPException) as create_exc:
+        create_residence(db_session, ResidenceCreate(name=active.name))
+    assert_bad_request_message(create_exc, "启用住宅名称已存在")
+
+    with pytest.raises(HTTPException) as reactivate_exc:
+        update_residence(
+            db_session,
+            inactive.id,
+            ResidenceUpdate(name=active.name, is_active=True),
+        )
+    assert_bad_request_message(reactivate_exc, "启用住宅名称已存在")
 
 
 def test_create_category_rejects_duplicate_code(db_session: Session) -> None:
