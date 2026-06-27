@@ -1,3 +1,4 @@
+from app.models.audit import AuditLog
 from app.models.auth import AuthSession, ExternalIdentity, Permission, Role, User
 from app.models.configuration import (
     AttributeDefinition,
@@ -28,6 +29,7 @@ __all__ = [
     "AttributeDefinition",
     "AttributeOption",
     "AuthSession",
+    "AuditLog",
     "Category",
     "DictionaryGroup",
     "DictionaryOption",

@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models import AuthSession, ExternalIdentity, Permission, Role, User
+from app.models import AuthSession, AuditLog, ExternalIdentity, Permission, Role, User
 
 
 EXPECTED_AUTH_TABLES = {
@@ -38,6 +38,8 @@ EXPECTED_CONFIGURATION_TABLES = {
     "dictionary_groups",
     "dictionary_options",
 }
+
+EXPECTED_AUDIT_TABLES = {"audit_logs"}
 
 
 def alembic_config(db_path: str) -> Config:
@@ -327,5 +329,98 @@ def test_residence_active_unique_downgrade_refuses_duplicates_before_dropping_in
 
         assert "ix_residences_name" in residence_indexes
         assert "uq_residences_active_name" in residence_indexes
+    finally:
+        restore_alembic_database_url(cfg)
+
+
+def test_audit_log_table_is_registered() -> None:
+    assert EXPECTED_AUDIT_TABLES.issubset(set(Base.metadata.tables))
+
+
+def test_audit_log_model_persists_actor_resource_and_metadata(db_session) -> None:
+    user = User(
+        username="audit-admin",
+        password_hash="hashed-password",
+        display_name="Audit Admin",
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    audit_log = AuditLog(
+        actor_user_id=user.id,
+        actor_username=user.username,
+        action="admin.user.create",
+        resource_type="user",
+        resource_id="42",
+        resource_label="manager",
+        result="success",
+        metadata_json={"changed_fields": ["display_name"], "role_codes": ["viewer"]},
+    )
+    db_session.add(audit_log)
+    db_session.commit()
+    db_session.refresh(audit_log)
+
+    assert audit_log.id is not None
+    assert audit_log.occurred_at is not None
+    assert audit_log.actor is user
+    assert audit_log.metadata_json == {
+        "changed_fields": ["display_name"],
+        "role_codes": ["viewer"],
+    }
+
+
+def test_audit_log_migration_exists_and_round_trips(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit_logs.sqlite3"
+    cfg = alembic_config(str(db_path))
+
+    try:
+        script = ScriptDirectory.from_config(cfg)
+        revision = script.get_revision("20260628_0007")
+
+        assert revision is not None
+        assert revision.down_revision == "20260627_0006"
+
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            inspector = inspect(engine)
+            upgraded_tables = set(inspector.get_table_names())
+            audit_columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+            audit_indexes = {index["name"] for index in inspector.get_indexes("audit_logs")}
+        finally:
+            engine.dispose()
+
+        assert "audit_logs" in upgraded_tables
+        assert {
+            "id",
+            "occurred_at",
+            "actor_user_id",
+            "actor_username",
+            "action",
+            "resource_type",
+            "resource_id",
+            "resource_label",
+            "result",
+            "metadata",
+        }.issubset(audit_columns)
+        assert {
+            "ix_audit_logs_occurred_at",
+            "ix_audit_logs_action",
+            "ix_audit_logs_resource_type",
+            "ix_audit_logs_actor_user_id",
+            "ix_audit_logs_result",
+        }.issubset(audit_indexes)
+
+        command.downgrade(cfg, "20260627_0006")
+
+        downgraded_engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            downgraded_tables = set(inspect(downgraded_engine).get_table_names())
+        finally:
+            downgraded_engine.dispose()
+
+        assert "audit_logs" not in downgraded_tables
     finally:
         restore_alembic_database_url(cfg)
