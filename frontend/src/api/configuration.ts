@@ -120,6 +120,14 @@ export interface ResidenceCreate {
   sort_order?: number
 }
 
+export interface ResidenceUpdate {
+  name: string
+  description: string
+  address: string
+  sort_order: number
+  is_active: boolean
+}
+
 export interface LocationNodeCreate {
   residence_id: number
   parent_id?: number | null
@@ -164,6 +172,14 @@ export async function fetchConfigBootstrapApi(): Promise<ConfigBootstrap> {
 
 export async function createResidenceApi(payload: ResidenceCreate): Promise<Residence> {
   const response = await apiClient.post<Residence>('/config/residences', payload)
+  return response.data
+}
+
+export async function updateResidenceApi(
+  residenceId: number,
+  payload: ResidenceUpdate
+): Promise<Residence> {
+  const response = await apiClient.patch<Residence>(`/config/residences/${residenceId}`, payload)
   return response.data
 }
 

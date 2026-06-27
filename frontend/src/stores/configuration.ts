@@ -7,12 +7,14 @@ import {
   createLocationNodeApi,
   createResidenceApi,
   fetchConfigBootstrapApi,
+  updateResidenceApi,
   type AttributeDefinitionCreate,
   type CategoryCreate,
   type ConfigBootstrap,
   type FamilyMemberCreate,
   type LocationNodeCreate,
-  type ResidenceCreate
+  type ResidenceCreate,
+  type ResidenceUpdate
 } from '../api/configuration'
 
 interface ConfigurationState {
@@ -33,6 +35,10 @@ export const useConfigurationStore = defineStore('configuration', {
     },
     async createResidence(payload: ResidenceCreate) {
       await createResidenceApi(payload)
+      await this.load()
+    },
+    async updateResidence(residenceId: number, payload: ResidenceUpdate) {
+      await updateResidenceApi(residenceId, payload)
       await this.load()
     },
     async createLocationNode(payload: LocationNodeCreate) {

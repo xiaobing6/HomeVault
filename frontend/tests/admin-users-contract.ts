@@ -12,9 +12,15 @@ import {
   type AdminUserListResponse,
   type AdminUserUpdateRequest
 } from '../src/api/admin'
+import {
+  updateResidenceApi,
+  type Residence,
+  type ResidenceUpdate
+} from '../src/api/configuration'
 import AdminUsersPage from '../src/pages/AdminUsersPage.vue'
 import { router } from '../src/router'
 import { useAdminUsersStore } from '../src/stores/adminUsers'
+import { useConfigurationStore } from '../src/stores/configuration'
 
 function expectType<T>(_value: T): void {}
 
@@ -43,12 +49,27 @@ const resetPayload: AdminPasswordResetRequest = {
   password: 'new-password'
 }
 
+const residenceUpdatePayload: ResidenceUpdate = {
+  name: 'Main Home',
+  description: 'Primary residence',
+  address: '123 Garden Road',
+  sort_order: 10,
+  is_active: false
+}
+
 async function assertAdminUsersApiContract() {
   expectType<AdminUserListResponse>(await listAdminUsersApi(filters))
   expectType<AdminRole[]>(await fetchAdminRolesApi())
   expectType<AdminUser>(await createAdminUserApi(createPayload))
   expectType<AdminUser>(await updateAdminUserApi(1, updatePayload))
   expectType<AdminUser>(await resetAdminUserPasswordApi(1, resetPayload))
+}
+
+async function assertResidenceConfigurationContract() {
+  const configuration = useConfigurationStore()
+
+  expectType<Residence>(await updateResidenceApi(1, residenceUpdatePayload))
+  await configuration.updateResidence(1, residenceUpdatePayload)
 }
 
 async function assertAdminUsersStoreContract() {
@@ -77,6 +98,7 @@ async function assertAdminUsersStoreContract() {
 }
 
 void assertAdminUsersApiContract
+void assertResidenceConfigurationContract
 void assertAdminUsersStoreContract
 
 function assertAdminUsersRouteContract() {

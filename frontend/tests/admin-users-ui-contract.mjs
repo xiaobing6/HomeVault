@@ -13,6 +13,7 @@ function readSource(relativePath) {
 const routerSource = readSource('src/router/index.ts')
 const appLayout = readSource('src/layouts/AppLayout.vue')
 const adminUsersPage = readSource('src/pages/AdminUsersPage.vue')
+const residenceLocationPanel = readSource('src/components/config/ResidenceLocationPanel.vue')
 
 assert.match(routerSource, /path:\s*'admin\/users'/, 'Router should define the admin users child path')
 assert.match(routerSource, /name:\s*'admin-users'/, 'Admin users route should use the admin-users name')
@@ -159,3 +160,64 @@ assert.match(
   'Updated date formatting should use zh-CN 24-hour locale'
 )
 assert.match(adminUsersPage, /Number\.isNaN\(date\.getTime\(\)\)/, 'Invalid date formatting should fall back to the raw value')
+
+assert.match(
+  residenceLocationPanel,
+  /import\s+\{\s*[^}]*\bEdit\b[^}]*\}\s+from\s+'@element-plus\/icons-vue'/s,
+  'Residence/location panel should import the Edit icon for residence edit actions'
+)
+assert.match(
+  residenceLocationPanel,
+  /type\s+\{\s*[^}]*\bResidence\b[^}]*\}\s+from\s+'..\/..\/api\/configuration'/s,
+  'Residence/location panel should import the Residence type'
+)
+assert.match(
+  residenceLocationPanel,
+  /const\s+residenceEditOpen\s*=\s*ref\(/,
+  'Residence/location panel should track residence edit dialog open state'
+)
+assert.match(
+  residenceLocationPanel,
+  /const\s+editingResidence\s*=\s*ref<Residence\s*\|\s*null>\(/,
+  'Residence/location panel should track the residence being edited'
+)
+assert.match(
+  residenceLocationPanel,
+  /const\s+residenceEditForm\s*=\s*reactive\([\s\S]*is_active:/,
+  'Residence edit form should include is_active'
+)
+assert.match(
+  residenceLocationPanel,
+  /function\s+openResidenceEdit\(\s*residence:\s*Residence\s*\)/,
+  'Residence/location panel should expose openResidenceEdit'
+)
+assert.match(
+  residenceLocationPanel,
+  /async\s+function\s+updateResidence\(\)/,
+  'Residence/location panel should expose updateResidence'
+)
+assert.match(
+  residenceLocationPanel,
+  /configuration\.updateResidence\(\s*editingResidence\.value\.id/,
+  'Residence edit save should call configuration.updateResidence with the editing residence id'
+)
+assert.match(
+  residenceLocationPanel,
+  /<el-table-column\s+prop="is_active"[\s\S]*<el-tag[\s\S]*row\.is_active/s,
+  'Residence table should show active/inactive state with a tag'
+)
+assert.match(
+  residenceLocationPanel,
+  /openResidenceEdit\(row\)/,
+  'Residence table should provide an edit action'
+)
+assert.match(
+  residenceLocationPanel,
+  /:icon="Edit"/,
+  'Residence edit action should use the Edit icon'
+)
+assert.match(
+  residenceLocationPanel,
+  /<el-dialog[\s\S]*residenceEditOpen[\s\S]*<el-switch[\s\S]*v-model="residenceEditForm\.is_active"/s,
+  'Residence edit dialog should include an active switch'
+)

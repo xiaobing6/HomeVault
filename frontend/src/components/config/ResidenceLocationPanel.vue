@@ -2,10 +2,10 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, type FormInstance } from 'element-plus'
-import { CirclePlus, Plus } from '@element-plus/icons-vue'
+import { CirclePlus, Edit, Plus } from '@element-plus/icons-vue'
 
 import { getChineseErrorMessage } from '../../api/client'
-import type { LocationNode } from '../../api/configuration'
+import type { LocationNode, Residence } from '../../api/configuration'
 import { useConfigurationStore } from '../../stores/configuration'
 
 interface LocationOption {
@@ -23,7 +23,10 @@ const configuration = useConfigurationStore()
 const { data } = storeToRefs(configuration)
 
 const residenceFormRef = ref<FormInstance>()
+const residenceEditFormRef = ref<FormInstance>()
 const locationFormRef = ref<FormInstance>()
+const residenceEditOpen = ref(false)
+const editingResidence = ref<Residence | null>(null)
 const residenceSaving = ref(false)
 const locationSaving = ref(false)
 
@@ -31,6 +34,14 @@ const residenceForm = reactive({
   name: '',
   description: '',
   address: ''
+})
+
+const residenceEditForm = reactive({
+  name: '',
+  description: '',
+  address: '',
+  sort_order: 0,
+  is_active: true
 })
 
 const locationForm = reactive({
@@ -100,6 +111,12 @@ function trimResidenceForm() {
   residenceForm.address = residenceForm.address.trim()
 }
 
+function trimResidenceEditForm() {
+  residenceEditForm.name = residenceEditForm.name.trim()
+  residenceEditForm.description = residenceEditForm.description.trim()
+  residenceEditForm.address = residenceEditForm.address.trim()
+}
+
 function trimLocationForm() {
   locationForm.name = locationForm.name.trim()
 }
@@ -117,6 +134,52 @@ async function saveResidence() {
       address: residenceForm.address.trim()
     })
     Object.assign(residenceForm, { name: '', description: '', address: '' })
+    ElMessage.success('已保存')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    residenceSaving.value = false
+  }
+}
+
+function openResidenceEdit(residence: Residence) {
+  editingResidence.value = residence
+  Object.assign(residenceEditForm, {
+    name: residence.name,
+    description: residence.description,
+    address: residence.address,
+    sort_order: residence.sort_order,
+    is_active: residence.is_active
+  })
+  residenceEditOpen.value = true
+}
+
+function clearResidenceEdit() {
+  editingResidence.value = null
+  Object.assign(residenceEditForm, {
+    name: '',
+    description: '',
+    address: '',
+    sort_order: 0,
+    is_active: true
+  })
+}
+
+async function updateResidence() {
+  trimResidenceEditForm()
+  const valid = await validateForm(residenceEditFormRef.value)
+  if (!valid || !editingResidence.value) return
+
+  residenceSaving.value = true
+  try {
+    await configuration.updateResidence(editingResidence.value.id, {
+      name: residenceEditForm.name.trim(),
+      description: residenceEditForm.description.trim(),
+      address: residenceEditForm.address.trim(),
+      sort_order: Number(residenceEditForm.sort_order) || 0,
+      is_active: residenceEditForm.is_active
+    })
+    residenceEditOpen.value = false
     ElMessage.success('已保存')
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
@@ -177,6 +240,20 @@ async function saveLocation() {
         <el-table-column prop="name" label="名称" min-width="120" />
         <el-table-column prop="address" label="地址" min-width="180" show-overflow-tooltip />
         <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="is_active" label="状态" width="92">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.is_active ? 'success' : 'info'">
+              {{ row.is_active ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="92" fixed="right">
+          <template #default="{ row }">
+            <el-button text type="primary" :icon="Edit" @click="openResidenceEdit(row)">
+              编辑
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </section>
 
@@ -245,6 +322,55 @@ async function saveLocation() {
       </div>
     </section>
   </div>
+
+  <el-dialog
+    v-model="residenceEditOpen"
+    title="编辑住宅"
+    width="520px"
+    destroy-on-close
+    @closed="clearResidenceEdit"
+  >
+    <el-form
+      ref="residenceEditFormRef"
+      :model="residenceEditForm"
+      label-position="top"
+      class="compact-form"
+    >
+      <el-form-item label="住宅名称" prop="name" :rules="[{ required: true, message: '请输入住宅名称' }]">
+        <el-input v-model="residenceEditForm.name" maxlength="40" />
+      </el-form-item>
+      <el-form-item label="描述">
+        <el-input v-model="residenceEditForm.description" maxlength="120" />
+      </el-form-item>
+      <el-form-item label="地址">
+        <el-input v-model="residenceEditForm.address" maxlength="160" />
+      </el-form-item>
+      <div class="form-row">
+        <el-form-item label="排序">
+          <el-input-number
+            v-model="residenceEditForm.sort_order"
+            :min="0"
+            :step="1"
+            controls-position="right"
+            class="full-width"
+          />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch
+            v-model="residenceEditForm.is_active"
+            active-text="启用"
+            inactive-text="停用"
+          />
+        </el-form-item>
+      </div>
+    </el-form>
+    <template #footer>
+      <el-button @click="residenceEditOpen = false">取消</el-button>
+      <el-button type="primary" :loading="residenceSaving" @click="updateResidence">
+        保存
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
