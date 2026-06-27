@@ -11,6 +11,10 @@ from app.models.auth import User
 from app.services.seed import seed_auth_baseline
 
 
+ROLE_REQUIRED_MESSAGE = "\u7528\u6237\u81f3\u5c11\u9700\u8981\u4e00\u4e2a\u89d2\u8272"
+ROLE_NOT_FOUND_MESSAGE = "\u89d2\u8272\u4e0d\u5b58\u5728"
+
+
 @pytest.fixture()
 def client(db_session: Session) -> Iterator[TestClient]:
     seed_auth_baseline(db_session, admin_username="admin", admin_password="ChangeMe123!")
@@ -61,8 +65,11 @@ def test_admin_can_list_roles_create_update_and_reset_user(
 
     listed = client.get("/api/admin/users", headers=headers, params={"search": "man"})
     assert listed.status_code == 200
-    assert listed.json()["total"] == 1
-    user_id = listed.json()["items"][0]["id"]
+    listed_body = listed.json()
+    assert listed_body["total"] == 1
+    assert listed_body["page"] == 1
+    assert listed_body["page_size"] == 20
+    user_id = listed_body["items"][0]["id"]
 
     updated = client.patch(
         f"/api/admin/users/{user_id}",
@@ -171,6 +178,43 @@ def test_user_management_rejects_bad_roles_and_duplicate_username(client: TestCl
     )
     assert bad_role.status_code == 400
     assert bad_role.json()["message"] == "角色不存在"
+
+    update_target = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "updaterole",
+            "display_name": "Update Role",
+            "password": "UpdateRole123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert update_target.status_code == 201
+    update_user_id = update_target.json()["id"]
+
+    update_empty_roles = client.patch(
+        f"/api/admin/users/{update_user_id}",
+        headers=headers,
+        json={"display_name": "Update Role", "is_active": True, "role_codes": []},
+    )
+    assert update_empty_roles.status_code == 400
+    assert update_empty_roles.json()["message"] == ROLE_REQUIRED_MESSAGE
+
+    update_blank_roles = client.patch(
+        f"/api/admin/users/{update_user_id}",
+        headers=headers,
+        json={"display_name": "Update Role", "is_active": True, "role_codes": ["   "]},
+    )
+    assert update_blank_roles.status_code == 400
+    assert update_blank_roles.json()["message"] == ROLE_REQUIRED_MESSAGE
+
+    update_bad_role = client.patch(
+        f"/api/admin/users/{update_user_id}",
+        headers=headers,
+        json={"display_name": "Update Role", "is_active": True, "role_codes": ["missing"]},
+    )
+    assert update_bad_role.status_code == 400
+    assert update_bad_role.json()["message"] == ROLE_NOT_FOUND_MESSAGE
 
     duplicate = client.post(
         "/api/admin/users",
