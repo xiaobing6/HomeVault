@@ -38,6 +38,23 @@ function hasNonPaginationFilter(filters: AdminUserFilters): boolean {
 
 let loadUsersRequestId = 0
 let loadRolesRequestId = 0
+const activeLoadCounts = new WeakMap<object, number>()
+
+function beginLoad(store: { loading: boolean }) {
+  activeLoadCounts.set(store, (activeLoadCounts.get(store) ?? 0) + 1)
+  store.loading = true
+}
+
+function finishLoad(store: { loading: boolean }) {
+  const activeLoads = (activeLoadCounts.get(store) ?? 0) - 1
+  if (activeLoads > 0) {
+    activeLoadCounts.set(store, activeLoads)
+    return
+  }
+
+  activeLoadCounts.delete(store)
+  store.loading = false
+}
 
 export const useAdminUsersStore = defineStore('adminUsers', {
   state: (): AdminUsersState => ({
@@ -61,7 +78,7 @@ export const useAdminUsersStore = defineStore('adminUsers', {
       }
 
       const requestId = ++loadUsersRequestId
-      this.loading = true
+      beginLoad(this)
       try {
         const response = await listAdminUsersApi(this.filters)
         if (requestId !== loadUsersRequestId) return
@@ -73,14 +90,12 @@ export const useAdminUsersStore = defineStore('adminUsers', {
       } catch (error) {
         if (requestId === loadUsersRequestId) throw error
       } finally {
-        if (requestId === loadUsersRequestId) {
-          this.loading = false
-        }
+        finishLoad(this)
       }
     },
     async loadRoles() {
       const requestId = ++loadRolesRequestId
-      this.loading = true
+      beginLoad(this)
       try {
         const roles = await fetchAdminRolesApi()
         if (requestId !== loadRolesRequestId) return
@@ -88,9 +103,7 @@ export const useAdminUsersStore = defineStore('adminUsers', {
       } catch (error) {
         if (requestId === loadRolesRequestId) throw error
       } finally {
-        if (requestId === loadRolesRequestId) {
-          this.loading = false
-        }
+        finishLoad(this)
       }
     },
     applyFilters(filters: AdminUserFilters) {
