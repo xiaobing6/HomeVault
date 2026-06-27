@@ -8,7 +8,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
@@ -64,6 +64,36 @@ def restore_alembic_database_url(config: Config) -> None:
 
 def session_expiry() -> datetime:
     return datetime.now(timezone.utc) + timedelta(hours=1)
+
+
+def _insert_home_space(connection, name: str = "Home") -> int:
+    now = datetime.now(timezone.utc)
+    result = connection.execute(
+        text(
+            "INSERT INTO home_spaces (name, description, is_active, created_at, updated_at) "
+            "VALUES (:name, '', 1, :created_at, :updated_at)"
+        ),
+        {"name": name, "created_at": now, "updated_at": now},
+    )
+    return result.lastrowid
+
+
+def _insert_residence(connection, home_space_id: int, name: str, is_active: bool) -> None:
+    now = datetime.now(timezone.utc)
+    connection.execute(
+        text(
+            "INSERT INTO residences "
+            "(home_space_id, name, description, address, sort_order, is_active, created_at, updated_at) "
+            "VALUES (:home_space_id, :name, '', '', 0, :is_active, :created_at, :updated_at)"
+        ),
+        {
+            "home_space_id": home_space_id,
+            "name": name,
+            "is_active": int(is_active),
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
 
 
 def test_auth_tables_are_registered() -> None:
@@ -245,6 +275,52 @@ def test_residence_active_unique_index_migration_exists_and_upgrades(tmp_path: P
 
         engine = create_engine(f"sqlite:///{db_path}")
         try:
+            residence_indexes = {index["name"] for index in inspect(engine).get_indexes("residences")}
+            with engine.begin() as connection:
+                active_index_sql = connection.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'index' AND name = 'uq_residences_active_name'"
+                    )
+                ).scalar_one()
+                home_space_id = _insert_home_space(connection)
+                _insert_residence(connection, home_space_id, "Lake House", is_active=True)
+
+            with pytest.raises(IntegrityError):
+                with engine.begin() as connection:
+                    _insert_residence(connection, home_space_id, "Lake House", is_active=True)
+
+            with engine.begin() as connection:
+                _insert_residence(connection, home_space_id, "Lake House", is_active=False)
+        finally:
+            engine.dispose()
+
+        assert "ix_residences_name" in residence_indexes
+        assert "uq_residences_active_name" in residence_indexes
+        assert "WHERE is_active = 1" in active_index_sql
+    finally:
+        restore_alembic_database_url(cfg)
+
+
+def test_residence_active_unique_downgrade_refuses_duplicates_before_dropping_indexes(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "residence_active_unique_downgrade_guard.sqlite3"
+    cfg = alembic_config(str(db_path))
+
+    try:
+        command.upgrade(cfg, "head")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as connection:
+                home_space_id = _insert_home_space(connection)
+                _insert_residence(connection, home_space_id, "Lake House", is_active=True)
+                _insert_residence(connection, home_space_id, "Lake House", is_active=False)
+
+            with pytest.raises(RuntimeError, match="duplicate residence names"):
+                command.downgrade(cfg, "20260620_0005")
+
             residence_indexes = {index["name"] for index in inspect(engine).get_indexes("residences")}
         finally:
             engine.dispose()

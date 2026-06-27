@@ -27,6 +27,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    duplicate = bind.execute(
+        sa.text(
+            "SELECT name, COUNT(*) AS row_count "
+            "FROM residences "
+            "GROUP BY name "
+            "HAVING COUNT(*) > 1 "
+            "LIMIT 1"
+        )
+    ).mappings().first()
+    if duplicate is not None:
+        raise RuntimeError(
+            "Cannot downgrade residence active-only uniqueness while duplicate residence names exist. "
+            f"Duplicate name {duplicate['name']!r} has {duplicate['row_count']} rows."
+        )
+
     if _index_exists("uq_residences_active_name"):
         op.drop_index("uq_residences_active_name", table_name="residences")
     if _index_exists("ix_residences_name"):
