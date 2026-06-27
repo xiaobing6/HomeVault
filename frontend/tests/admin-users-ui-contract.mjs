@@ -22,6 +22,8 @@ assert.match(appLayout, /<PermissionGate\s+permission="users:manage">/, 'Layout 
 assert.match(appLayout, /<el-menu-item\s+index="\/admin\/users">/, 'Layout should link to /admin/users')
 
 assert.match(adminUsersPage, /useAdminUsersStore\(\)/, 'Admin users page should use the Task 3 admin users store')
+assert.match(adminUsersPage, /useAuthStore\(\)/, 'Admin users page should use the auth store for self password resets')
+assert.match(adminUsersPage, /useRouter\(\)/, 'Admin users page should use the router for self password reset redirects')
 assert.match(
   adminUsersPage,
   /Promise\.all\(\s*\[\s*adminUsers\.loadRoles\(\),\s*adminUsers\.loadUsers\(\)\s*\]\s*\)/s,
@@ -149,10 +151,21 @@ assert.match(
 )
 const saveResetStart = adminUsersPage.indexOf('async function saveResetPassword()')
 assert.notEqual(saveResetStart, -1, 'Save reset password function should exist')
+const saveResetSource = adminUsersPage.slice(saveResetStart)
 assert.match(
-  adminUsersPage.slice(saveResetStart),
+  saveResetSource,
+  /const\s+isSelfReset\s*=\s*resettingUser\.value\.id\s*===\s*auth\.user\?\.id/,
+  'Password reset save should capture whether the target is the current user before calling the API'
+)
+assert.match(
+  saveResetSource,
   /clearResetPasswordDialogState\(\)/,
   'Successful password reset should immediately clear sensitive reset dialog state'
+)
+assert.match(
+  saveResetSource,
+  /if\s*\(\s*isSelfReset\s*\)\s*\{[\s\S]*auth\.clearSession\(\)[\s\S]*router\.push\(\s*\{\s*name:\s*'login'\s*\}\s*\)/,
+  'Successful self password reset should clear auth session and redirect to login'
 )
 assert.match(
   adminUsersPage,

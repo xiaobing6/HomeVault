@@ -1,19 +1,24 @@
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.deps import get_db
 from app.core.security import verify_password
 from app.main import app
 from app.models.auth import AuthSession, User
+from app.schemas.admin import AdminUserCreate, AdminUserUpdate
+from app.services import admin as admin_service
 from app.services.seed import seed_auth_baseline
 
 
 ROLE_REQUIRED_MESSAGE = "\u7528\u6237\u81f3\u5c11\u9700\u8981\u4e00\u4e2a\u89d2\u8272"
 ROLE_NOT_FOUND_MESSAGE = "\u89d2\u8272\u4e0d\u5b58\u5728"
+LAST_ACTIVE_ADMIN_MESSAGE = "至少保留一个启用的管理员"
 
 
 @pytest.fixture()
@@ -246,7 +251,7 @@ def test_user_management_prevents_last_active_admin_lockout(client: TestClient) 
         json={"display_name": "Admin", "is_active": False, "role_codes": ["admin"]},
     )
     assert deactivate.status_code == 400
-    assert deactivate.json()["message"] == "至少保留一个启用的管理员"
+    assert deactivate.json()["message"] == LAST_ACTIVE_ADMIN_MESSAGE
 
     remove_role = client.patch(
         f"/api/admin/users/{admin_id}",
@@ -254,7 +259,72 @@ def test_user_management_prevents_last_active_admin_lockout(client: TestClient) 
         json={"display_name": "Admin", "is_active": True, "role_codes": ["viewer"]},
     )
     assert remove_role.status_code == 400
-    assert remove_role.json()["message"] == "至少保留一个启用的管理员"
+    assert remove_role.json()["message"] == LAST_ACTIVE_ADMIN_MESSAGE
+
+
+def test_concurrent_admin_updates_keep_at_least_one_active_admin(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_auth_baseline(db_session, admin_username="admin", admin_password="ChangeMe123!")
+    second_admin = admin_service.create_user(
+        db_session,
+        AdminUserCreate(
+            username="secondadmin",
+            display_name="Second Admin",
+            password="SecondAdmin123!",
+            role_codes=["admin"],
+        ),
+    )
+    first_admin_id = db_session.scalar(select(User.id).where(User.username == "admin"))
+    assert first_admin_id is not None
+
+    first_count_done = Event()
+    both_counted = Event()
+    original_active_admin_count = admin_service.active_admin_count
+
+    def delayed_active_admin_count(db: Session, excluded_user_id: int | None = None) -> int:
+        result = original_active_admin_count(db, excluded_user_id)
+        if excluded_user_id in {first_admin_id, second_admin.id}:
+            if first_count_done.is_set():
+                both_counted.set()
+            else:
+                first_count_done.set()
+            both_counted.wait(timeout=0.25)
+        return result
+
+    monkeypatch.setattr(admin_service, "active_admin_count", delayed_active_admin_count)
+    TestingSessionLocal = sessionmaker(bind=db_session.get_bind(), autoflush=False, autocommit=False)
+
+    def deactivate_admin(user_id: int) -> tuple[bool, str | None]:
+        session = TestingSessionLocal()
+        try:
+            admin_service.update_user(
+                session,
+                user_id,
+                AdminUserUpdate(
+                    display_name=f"Admin {user_id}",
+                    is_active=False,
+                    role_codes=["admin"],
+                ),
+            )
+            return True, None
+        except Exception as exc:  # noqa: BLE001 - assert the service's API error message.
+            return False, getattr(exc, "detail", {}).get("message")
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(deactivate_admin, [first_admin_id, second_admin.id]))
+
+    db_session.expire_all()
+    remaining_active_admins = original_active_admin_count(db_session)
+    successes = [result for result in results if result[0]]
+    failures = [result for result in results if not result[0]]
+
+    assert len(successes) <= 1
+    assert remaining_active_admins == 1
+    assert any(message == LAST_ACTIVE_ADMIN_MESSAGE for _success, message in failures)
 
 
 def test_user_management_rejects_bad_roles_and_duplicate_username(client: TestClient) -> None:

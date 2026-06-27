@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Edit, Key, Plus, Refresh, Search } from '@element-plus/icons-vue'
 
@@ -12,6 +13,7 @@ import type {
 } from '../api/admin'
 import { getChineseErrorMessage } from '../api/client'
 import { useAdminUsersStore } from '../stores/adminUsers'
+import { useAuthStore } from '../stores/auth'
 
 type ActiveFilter = '' | 'active' | 'inactive'
 type UserDialogMode = 'create' | 'edit'
@@ -31,6 +33,8 @@ interface ResetPasswordFormModel {
 }
 
 const adminUsers = useAdminUsersStore()
+const auth = useAuthStore()
+const router = useRouter()
 const { users, roles, total, page, pageSize, loading, saving } = storeToRefs(adminUsers)
 
 const userDialogOpen = ref(false)
@@ -327,6 +331,7 @@ async function saveResetPassword() {
   if (!valid || !resettingUser.value) return
 
   const userId = resettingUser.value.id
+  const isSelfReset = resettingUser.value.id === auth.user?.id
   const password = resetPasswordForm.password
 
   try {
@@ -336,6 +341,10 @@ async function saveResetPassword() {
     resetPasswordDialogOpen.value = false
     clearResetPasswordDialogState()
     ElMessage.success('密码已重置')
+    if (isSelfReset) {
+      auth.clearSession()
+      await router.push({ name: 'login' })
+    }
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }

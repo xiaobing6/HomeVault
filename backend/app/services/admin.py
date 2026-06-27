@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from threading import RLock
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,8 @@ from app.schemas.admin import (
     AdminUserResponse,
     AdminUserUpdate,
 )
+
+_admin_user_update_lock = RLock()
 
 
 def serialize_admin_user(user: User) -> AdminUserResponse:
@@ -178,17 +181,18 @@ def get_user_for_admin(db: Session, user_id: int) -> User:
 
 
 def update_user(db: Session, user_id: int, payload: AdminUserUpdate) -> AdminUserResponse:
-    user = get_user_for_admin(db, user_id)
-    roles_by_code = role_map_by_code(db, payload.role_codes)
-    normalized_role_codes = sorted(roles_by_code)
-    assert_not_last_active_admin(db, user, payload.is_active, normalized_role_codes)
+    with _admin_user_update_lock:
+        user = get_user_for_admin(db, user_id)
+        roles_by_code = role_map_by_code(db, payload.role_codes)
+        normalized_role_codes = sorted(roles_by_code)
+        assert_not_last_active_admin(db, user, payload.is_active, normalized_role_codes)
 
-    user.display_name = payload.display_name
-    user.is_active = payload.is_active
-    user.roles = [roles_by_code[code] for code in normalized_role_codes]
-    db.commit()
-    db.refresh(user)
-    return serialize_admin_user(user)
+        user.display_name = payload.display_name
+        user.is_active = payload.is_active
+        user.roles = [roles_by_code[code] for code in normalized_role_codes]
+        db.commit()
+        db.refresh(user)
+        return serialize_admin_user(user)
 
 
 def reset_user_password(db: Session, user_id: int, payload: AdminPasswordReset) -> AdminUserResponse:
