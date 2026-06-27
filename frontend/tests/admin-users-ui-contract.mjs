@@ -31,10 +31,21 @@ assert.match(
   /ElMessage\.error\(getChineseErrorMessage\(error\)\)/,
   'Admin users page should surface store/API errors through Chinese error messages'
 )
-assert.match(
+const iconImport = adminUsersPage.match(
+  /import\s+\{\s*([^}]+?)\s*\}\s+from\s+'@element-plus\/icons-vue'/s
+)
+assert.ok(iconImport, 'Admin users page should import Element Plus icons')
+const importedIcons = new Set(iconImport[1].split(',').map((name) => name.trim()))
+for (const requiredIcon of ['Edit', 'Key', 'Plus', 'Refresh', 'Search']) {
+  assert.ok(
+    importedIcons.has(requiredIcon),
+    `Admin users page should import the ${requiredIcon} Element Plus icon`
+  )
+}
+assert.doesNotMatch(
   adminUsersPage,
-  /import\s+\{\s*Edit,\s*Key,\s*Plus,\s*Refresh,\s*Search\s*\}\s+from\s+'@element-plus\/icons-vue'/,
-  'Admin users page should use the required Element Plus icons'
+  /set:\s*\(\s*value:\s*string\s*\)\s*=>\s*\{[\s\S]*?adminUsers\.applyFilters\(\s*\{\s*search:/,
+  'Typing in the search box should not commit search filters before an explicit submit'
 )
 
 assert.match(adminUsersPage, /<div class="page-heading">/, 'Admin users page should use the shared page heading pattern')
@@ -43,9 +54,26 @@ assert.match(adminUsersPage, /<div class="table-panel">/, 'Admin users page shou
 assert.match(adminUsersPage, /<div class="pagination-row">/, 'Admin users page should include a pagination row')
 assert.match(adminUsersPage, /<div class="roles-panel">/, 'Admin users page should include a roles reference panel')
 
-assert.match(adminUsersPage, /v-model="searchValue"/, 'Toolbar search input should be bound to store search')
+assert.match(adminUsersPage, /const\s+searchDraft\s*=\s*ref\(/, 'Toolbar search should keep local draft state')
+assert.match(adminUsersPage, /v-model="searchDraft"/, 'Toolbar search input should be bound to local draft state')
+assert.doesNotMatch(adminUsersPage, /v-model="searchValue"/, 'Toolbar search input should not write through to store state on input')
 assert.match(adminUsersPage, /@keyup\.enter="loadUsers"/, 'Search input should load on Enter')
-assert.match(adminUsersPage, /@clear="loadUsers"/, 'Search clear should reload users')
+assert.match(adminUsersPage, /@clear="clearSearch"/, 'Search clear should clear draft and reload users')
+assert.match(
+  adminUsersPage,
+  /function\s+submittedSearch\(\)[\s\S]*searchDraft\.value\.trim\(\)[\s\S]*return\s+search\s*\|\|\s*null/,
+  'Search submit should trim the draft before loading users'
+)
+assert.match(
+  adminUsersPage,
+  /async\s+function\s+clearSearch\(\)[\s\S]*searchDraft\.value\s*=\s*''[\s\S]*loadUsers\(\)/,
+  'Search clear should clear the draft before loading users'
+)
+assert.match(
+  adminUsersPage,
+  /async\s+function\s+resetFilters\(\)[\s\S]*adminUsers\.resetFilters\(\)[\s\S]*syncSearchDraftFromFilters\(\)[\s\S]*adminUsers\.loadUsers\(\)/,
+  'Reset filters should synchronize the local search draft before reloading users'
+)
 assert.match(adminUsersPage, /v-model="roleValue"/, 'Toolbar role filter should be bound to store role filter')
 assert.match(adminUsersPage, /v-model="activeValue"/, 'Toolbar active filter should be bound to store active filter')
 assert.match(adminUsersPage, /@click="resetFilters"/, 'Toolbar should provide a reset filters action')
@@ -84,7 +112,47 @@ assert.doesNotMatch(
 )
 assert.match(adminUsersPage, /await adminUsers\.updateUser\(/, 'Edit save should call adminUsers.updateUser')
 assert.match(adminUsersPage, /await adminUsers\.resetPassword\(/, 'Reset dialog should call adminUsers.resetPassword')
-assert.match(adminUsersPage, /confirmPassword/, 'Reset password dialog should validate confirmation')
+assert.match(
+  adminUsersPage,
+  /(value\s*!==\s*resetPasswordForm\.password|resetPasswordForm\.password\s*!==\s*value)/,
+  'Reset password dialog should compare confirmation against the password field'
+)
+assert.match(
+  adminUsersPage,
+  /@closed="clearUserDialogState"/,
+  'Create/edit dialog should clear sensitive state after it closes'
+)
+assert.match(
+  adminUsersPage,
+  /function\s+clearUserDialogState\(\)[\s\S]*userForm\.password\s*=\s*''[\s\S]*editingUser\.value\s*=\s*null/,
+  'Create/edit dialog close handler should clear password and editing user state'
+)
+assert.match(
+  adminUsersPage,
+  /@closed="clearResetPasswordDialogState"/,
+  'Reset password dialog should clear sensitive state after it closes'
+)
+assert.match(
+  adminUsersPage,
+  /function\s+clearResetPasswordDialogState\(\)[\s\S]*resetPasswordForm\.password\s*=\s*''[\s\S]*resetPasswordForm\.confirmPassword\s*=\s*''[\s\S]*resettingUser\.value\s*=\s*null/,
+  'Reset password dialog close handler should clear both password fields and resetting user state'
+)
+const saveUserStart = adminUsersPage.indexOf('async function saveUser()')
+const saveUserEnd = adminUsersPage.indexOf('function openResetPasswordDialog', saveUserStart)
+assert.notEqual(saveUserStart, -1, 'Save user function should exist')
+assert.notEqual(saveUserEnd, -1, 'Reset password dialog opener should follow save user')
+assert.match(
+  adminUsersPage.slice(saveUserStart, saveUserEnd),
+  /clearUserDialogState\(\)/,
+  'Successful user save should immediately clear sensitive user dialog state'
+)
+const saveResetStart = adminUsersPage.indexOf('async function saveResetPassword()')
+assert.notEqual(saveResetStart, -1, 'Save reset password function should exist')
+assert.match(
+  adminUsersPage.slice(saveResetStart),
+  /clearResetPasswordDialogState\(\)/,
+  'Successful password reset should immediately clear sensitive reset dialog state'
+)
 assert.match(
   adminUsersPage,
   /toLocaleString\('zh-CN',\s*\{\s*hour12:\s*false\s*\}\)/,

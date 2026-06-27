@@ -40,6 +40,7 @@ const editingUser = ref<AdminUser | null>(null)
 const resettingUser = ref<AdminUser | null>(null)
 const userFormRef = ref<FormInstance>()
 const resetPasswordFormRef = ref<FormInstance>()
+const searchDraft = ref(adminUsers.filters.search ?? '')
 
 const defaultRoleCodes = (): string[] => {
   const viewerRole = roles.value.find((role) => role.code === 'viewer')
@@ -63,13 +64,6 @@ const resetPasswordForm = reactive<ResetPasswordFormModel>({
 const isCreateMode = computed(() => userDialogMode.value === 'create')
 const userDialogTitle = computed(() => (isCreateMode.value ? '新建用户' : '编辑用户'))
 const systemRoles = computed(() => roles.value.filter((role) => role.is_system))
-
-const searchValue = computed({
-  get: () => adminUsers.filters.search ?? '',
-  set: (value: string) => {
-    adminUsers.applyFilters({ search: value.trim() || null })
-  }
-})
 
 const roleValue = computed({
   get: () => adminUsers.filters.role ?? '',
@@ -159,6 +153,7 @@ const resetPasswordRules: FormRules<ResetPasswordFormModel> = {
 }
 
 onMounted(async () => {
+  syncSearchDraftFromFilters()
   try {
     await Promise.all([adminUsers.loadRoles(), adminUsers.loadUsers()])
   } catch (error) {
@@ -180,17 +175,33 @@ async function applyAndLoad(filters: AdminUserFilters) {
   }
 }
 
+function syncSearchDraftFromFilters() {
+  searchDraft.value = adminUsers.filters.search ?? ''
+}
+
+function submittedSearch(): string | null {
+  const search = searchDraft.value.trim()
+  searchDraft.value = search
+  return search || null
+}
+
 async function loadUsers() {
   try {
-    await adminUsers.loadUsers({ search: searchValue.value.trim() || null })
+    await adminUsers.loadUsers({ search: submittedSearch() })
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }
 }
 
+async function clearSearch() {
+  searchDraft.value = ''
+  await loadUsers()
+}
+
 async function resetFilters() {
   try {
     adminUsers.resetFilters()
+    syncSearchDraftFromFilters()
     await adminUsers.loadUsers()
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
@@ -240,6 +251,17 @@ async function clearResetPasswordValidation() {
   resetPasswordFormRef.value?.clearValidate()
 }
 
+function clearUserDialogState() {
+  userForm.password = ''
+  editingUser.value = null
+}
+
+function clearResetPasswordDialogState() {
+  resetPasswordForm.password = ''
+  resetPasswordForm.confirmPassword = ''
+  resettingUser.value = null
+}
+
 function openCreateDialog() {
   userDialogMode.value = 'create'
   editingUser.value = null
@@ -287,15 +309,15 @@ async function saveUser() {
     }
 
     userDialogOpen.value = false
+    clearUserDialogState()
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }
 }
 
 function openResetPasswordDialog(user: AdminUser) {
+  clearResetPasswordDialogState()
   resettingUser.value = user
-  resetPasswordForm.password = ''
-  resetPasswordForm.confirmPassword = ''
   resetPasswordDialogOpen.value = true
   void clearResetPasswordValidation()
 }
@@ -304,11 +326,15 @@ async function saveResetPassword() {
   const valid = await validateForm(resetPasswordFormRef.value)
   if (!valid || !resettingUser.value) return
 
+  const userId = resettingUser.value.id
+  const password = resetPasswordForm.password
+
   try {
-    await adminUsers.resetPassword(resettingUser.value.id, {
-      password: resetPasswordForm.password
+    await adminUsers.resetPassword(userId, {
+      password
     })
     resetPasswordDialogOpen.value = false
+    clearResetPasswordDialogState()
     ElMessage.success('密码已重置')
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
@@ -328,13 +354,13 @@ async function saveResetPassword() {
 
     <div class="toolbar-panel">
       <el-input
-        v-model="searchValue"
+        v-model="searchDraft"
         class="search-input"
         :prefix-icon="Search"
         placeholder="搜索用户名或显示名称"
         clearable
         @keyup.enter="loadUsers"
-        @clear="loadUsers"
+        @clear="clearSearch"
       />
 
       <div class="filter-actions">
@@ -440,6 +466,7 @@ async function saveResetPassword() {
       :title="userDialogTitle"
       width="min(620px, 96vw)"
       destroy-on-close
+      @closed="clearUserDialogState"
     >
       <el-form
         ref="userFormRef"
@@ -509,6 +536,7 @@ async function saveResetPassword() {
       title="重置密码"
       width="min(520px, 96vw)"
       destroy-on-close
+      @closed="clearResetPasswordDialogState"
     >
       <el-form
         ref="resetPasswordFormRef"
