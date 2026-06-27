@@ -387,8 +387,34 @@ def test_audit_log_migration_exists_and_round_trips(tmp_path: Path) -> None:
         try:
             inspector = inspect(engine)
             upgraded_tables = set(inspector.get_table_names())
-            audit_columns = {column["name"] for column in inspector.get_columns("audit_logs")}
+            audit_column_details = inspector.get_columns("audit_logs")
+            audit_columns = {column["name"] for column in audit_column_details}
+            audit_column_defaults = {
+                column["name"]: column.get("default") for column in audit_column_details
+            }
             audit_indexes = {index["name"] for index in inspector.get_indexes("audit_logs")}
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO audit_logs (action, resource_type, result) "
+                        "VALUES (:action, :resource_type, :result)"
+                    ),
+                    {
+                        "action": "auth.login.success",
+                        "resource_type": "auth_session",
+                        "result": "success",
+                    },
+                )
+                defaulted_occurred_at = connection.execute(
+                    text(
+                        "SELECT occurred_at FROM audit_logs "
+                        "WHERE action = :action AND resource_type = :resource_type"
+                    ),
+                    {
+                        "action": "auth.login.success",
+                        "resource_type": "auth_session",
+                    },
+                ).scalar_one()
         finally:
             engine.dispose()
 
@@ -412,6 +438,8 @@ def test_audit_log_migration_exists_and_round_trips(tmp_path: Path) -> None:
             "ix_audit_logs_actor_user_id",
             "ix_audit_logs_result",
         }.issubset(audit_indexes)
+        assert audit_column_defaults["occurred_at"] is not None
+        assert defaulted_occurred_at is not None
 
         command.downgrade(cfg, "20260627_0006")
 
