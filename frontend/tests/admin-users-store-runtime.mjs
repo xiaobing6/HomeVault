@@ -32,9 +32,9 @@ function buildRole(id) {
   }
 }
 
-function buildUserList(page = 1) {
+function buildUserList(page = 1, userId = page) {
   return {
-    items: [buildUser(page)],
+    items: [buildUser(userId)],
     total: 1,
     page,
     page_size: 20
@@ -109,6 +109,34 @@ try {
   assert.equal(adminUsers.loading, false, 'loading should be false after all active admin loads finish')
   assert.equal(adminUsers.users[0]?.id, 1)
   assert.equal(adminUsers.roles[0]?.id, 1)
+
+  const firstPinia = createPinia()
+  const secondPinia = createPinia()
+  const firstAdminUsers = useAdminUsersStore(firstPinia)
+  const secondAdminUsers = useAdminUsersStore(secondPinia)
+  const userResponses = []
+
+  apiClient.defaults.adapter = async (config) => {
+    if (config.url === '/admin/users') {
+      const response = deferredResponse(config, buildUserList(1, userResponses.length + 101))
+      userResponses.push(response)
+      return await response.promise
+    }
+    throw new Error(`Unexpected request: ${config.url}`)
+  }
+
+  const firstUsersLoad = firstAdminUsers.loadUsers()
+  const secondUsersLoad = secondAdminUsers.loadUsers()
+
+  assert.equal(userResponses.length, 2, 'both admin store instances should start their own loadUsers request')
+
+  userResponses[1].resolveResponse()
+  await secondUsersLoad
+  userResponses[0].resolveResponse()
+  await firstUsersLoad
+
+  assert.equal(firstAdminUsers.users[0]?.id, 101, 'first Pinia instance should keep its own loadUsers result')
+  assert.equal(secondAdminUsers.users[0]?.id, 102, 'second Pinia instance should keep its own loadUsers result')
 
   let requestedUserParams
   apiClient.defaults.adapter = async (config) => {

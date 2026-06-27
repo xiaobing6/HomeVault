@@ -36,23 +36,44 @@ function hasNonPaginationFilter(filters: AdminUserFilters): boolean {
   return (Object.keys(filters) as (keyof AdminUserFilters)[]).some((key) => !paginationFilterKeys.has(key))
 }
 
-let loadUsersRequestId = 0
-let loadRolesRequestId = 0
-const activeLoadCounts = new WeakMap<object, number>()
+interface LoadRequestTracker {
+  activeLoadCount: number
+  loadUsersRequestId: number
+  loadRolesRequestId: number
+}
+
+const loadRequestTrackers = new WeakMap<object, LoadRequestTracker>()
+
+function getLoadRequestTracker(store: object): LoadRequestTracker {
+  let tracker = loadRequestTrackers.get(store)
+  if (!tracker) {
+    tracker = {
+      activeLoadCount: 0,
+      loadUsersRequestId: 0,
+      loadRolesRequestId: 0
+    }
+    loadRequestTrackers.set(store, tracker)
+  }
+  return tracker
+}
 
 function beginLoad(store: { loading: boolean }) {
-  activeLoadCounts.set(store, (activeLoadCounts.get(store) ?? 0) + 1)
+  const tracker = getLoadRequestTracker(store)
+  tracker.activeLoadCount += 1
   store.loading = true
+  return tracker
 }
 
 function finishLoad(store: { loading: boolean }) {
-  const activeLoads = (activeLoadCounts.get(store) ?? 0) - 1
-  if (activeLoads > 0) {
-    activeLoadCounts.set(store, activeLoads)
+  const tracker = loadRequestTrackers.get(store)
+  if (!tracker) {
+    store.loading = false
     return
   }
 
-  activeLoadCounts.delete(store)
+  tracker.activeLoadCount -= 1
+  if (tracker.activeLoadCount > 0) return
+
   store.loading = false
 }
 
@@ -77,31 +98,31 @@ export const useAdminUsersStore = defineStore('adminUsers', {
         }
       }
 
-      const requestId = ++loadUsersRequestId
-      beginLoad(this)
+      const tracker = beginLoad(this)
+      const requestId = ++tracker.loadUsersRequestId
       try {
         const response = await listAdminUsersApi(this.filters)
-        if (requestId !== loadUsersRequestId) return
+        if (requestId !== tracker.loadUsersRequestId) return
         this.users = response.items
         this.total = response.total
         this.page = response.page
         this.pageSize = response.page_size
         this.filters = { ...this.filters, page: response.page, page_size: response.page_size }
       } catch (error) {
-        if (requestId === loadUsersRequestId) throw error
+        if (requestId === tracker.loadUsersRequestId) throw error
       } finally {
         finishLoad(this)
       }
     },
     async loadRoles() {
-      const requestId = ++loadRolesRequestId
-      beginLoad(this)
+      const tracker = beginLoad(this)
+      const requestId = ++tracker.loadRolesRequestId
       try {
         const roles = await fetchAdminRolesApi()
-        if (requestId !== loadRolesRequestId) return
+        if (requestId !== tracker.loadRolesRequestId) return
         this.roles = roles
       } catch (error) {
-        if (requestId === loadRolesRequestId) throw error
+        if (requestId === tracker.loadRolesRequestId) throw error
       } finally {
         finishLoad(this)
       }
