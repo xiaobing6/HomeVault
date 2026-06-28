@@ -64,7 +64,7 @@ def test_admin_user_mutations_write_audit_logs(
     updated = client.patch(
         f"/api/admin/users/{user_id}",
         headers=headers,
-        json={"display_name": "Audited User", "is_active": False, "role_codes": ["viewer"]},
+        json={"display_name": "Audited User", "is_active": False, "role_codes": ["editor"]},
     )
     assert updated.status_code == 200
 
@@ -89,10 +89,48 @@ def test_admin_user_mutations_write_audit_logs(
     assert {log.actor_username for log in audit_logs} == {"admin"}
     assert audit_logs[1].metadata_json == {
         "changed_fields": ["display_name", "is_active", "role_codes"],
-        "role_codes": ["viewer"],
+        "role_codes": ["editor"],
         "is_active": False,
     }
     assert "password" not in (audit_logs[2].metadata_json or {})
+
+
+def test_admin_user_update_audit_omits_unchanged_role_codes(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    created = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "displayonly",
+            "display_name": "Display Only",
+            "password": "DisplayOnly123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert created.status_code == 201
+    user_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/api/admin/users/{user_id}",
+        headers=headers,
+        json={"display_name": "Display Changed", "is_active": True, "role_codes": ["viewer"]},
+    )
+    assert updated.status_code == 200
+
+    audit_log = db_session.scalars(
+        select(AuditLog)
+        .where(AuditLog.resource_id == str(user_id), AuditLog.action == "admin.user.update")
+        .order_by(AuditLog.id.desc())
+    ).first()
+
+    assert audit_log is not None
+    assert audit_log.metadata_json is not None
+    assert "display_name" in audit_log.metadata_json["changed_fields"]
+    assert "role_codes" not in audit_log.metadata_json["changed_fields"]
+    assert audit_log.metadata_json["role_codes"] == ["viewer"]
 
 
 def test_admin_can_list_roles_create_update_and_reset_user(

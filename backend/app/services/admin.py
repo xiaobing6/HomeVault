@@ -203,12 +203,14 @@ def update_user(
         normalized_role_codes = sorted(roles_by_code)
         assert_not_last_active_admin(db, user, payload.is_active, normalized_role_codes)
 
+        current_role_codes = sorted({role.code for role in user.roles})
         changed_fields: list[str] = []
         if user.display_name != payload.display_name:
             changed_fields.append("display_name")
         if user.is_active != payload.is_active:
             changed_fields.append("is_active")
-        changed_fields.append("role_codes")
+        if current_role_codes != normalized_role_codes:
+            changed_fields.append("role_codes")
 
         user.display_name = payload.display_name
         user.is_active = payload.is_active

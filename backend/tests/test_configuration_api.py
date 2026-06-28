@@ -67,16 +67,39 @@ def test_configuration_mutations_write_audit_logs(
         json={"residence_id": residence_id, "name": "Shelf", "node_type": "area"},
     )
     assert location.status_code == 201
+    location_id = location.json()["id"]
 
-    audit_actions = db_session.scalars(
-        select(AuditLog.action)
+    audit_logs = db_session.scalars(
+        select(AuditLog)
         .where(AuditLog.action.like("config.%"))
         .order_by(AuditLog.id)
     ).all()
+    audit_logs_by_action = {log.action: log for log in audit_logs}
 
-    assert "config.residence.create" in audit_actions
-    assert "config.residence.update" in audit_actions
-    assert "config.location.create" in audit_actions
+    assert set(audit_logs_by_action) == {
+        "config.residence.create",
+        "config.residence.update",
+        "config.location.create",
+    }
+    assert {log.actor_username for log in audit_logs} == {"admin"}
+
+    residence_create_log = audit_logs_by_action["config.residence.create"]
+    assert residence_create_log.resource_type == "residence"
+    assert residence_create_log.resource_id == str(residence_id)
+    assert residence_create_log.resource_label == "Audit Home"
+    assert residence_create_log.metadata_json == {"is_active": True}
+
+    residence_update_log = audit_logs_by_action["config.residence.update"]
+    assert residence_update_log.resource_type == "residence"
+    assert residence_update_log.resource_id == str(residence_id)
+    assert residence_update_log.resource_label == "Audit Home"
+    assert residence_update_log.metadata_json == {"is_active": False}
+
+    location_create_log = audit_logs_by_action["config.location.create"]
+    assert location_create_log.resource_type == "location_node"
+    assert location_create_log.resource_id == str(location_id)
+    assert location_create_log.resource_label == "Shelf"
+    assert location_create_log.metadata_json == {"residence_id": residence_id}
 
 
 def test_bootstrap_returns_seeded_core_config(client: TestClient) -> None:
