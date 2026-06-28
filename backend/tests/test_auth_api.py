@@ -5,10 +5,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.routes import auth as auth_routes
 from app.api.deps import get_db
-from app.db.base import Base
 from app.main import app
-from app.models import AuditLog
+from app.models import AuditLog, AuthSession, User
+from app.schemas.auth import LoginRequest
 from app.services.seed import seed_auth_baseline
 
 
@@ -75,6 +76,27 @@ def test_login_success_and_failure_write_audit_logs(
     assert "password" not in last_two[1].metadata_json
 
 
+def test_successful_login_rolls_back_session_when_audit_fails(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_auth_baseline(db_session, admin_username="admin", admin_password="ChangeMe123!")
+
+    def fail_record_audit_log(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("audit failed")
+
+    monkeypatch.setattr(auth_routes, "record_audit_log", fail_record_audit_log)
+
+    with pytest.raises(RuntimeError, match="audit failed"):
+        auth_routes.login(
+            LoginRequest(username="admin", password="ChangeMe123!"),
+            db_session,
+        )
+
+    sessions = db_session.scalars(select(AuthSession)).all()
+    assert sessions == []
+
+
 def test_me_requires_token(client: TestClient) -> None:
     response = client.get("/api/auth/me")
 
@@ -111,6 +133,36 @@ def test_logout_writes_audit_log(client: TestClient, db_session: Session) -> Non
     assert audit_log.resource_type == "auth_session"
     assert audit_log.result == "success"
     assert audit_log.resource_id
+
+
+def test_logout_rolls_back_revocation_when_audit_fails(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "ChangeMe123!"},
+    )
+    assert login.status_code == 200
+
+    session = db_session.scalar(select(AuthSession).order_by(AuthSession.id.desc()))
+    user = db_session.scalar(select(User).where(User.username == "admin"))
+    assert session is not None
+    assert user is not None
+
+    def fail_record_audit_log(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("audit failed")
+
+    monkeypatch.setattr(auth_routes, "record_audit_log", fail_record_audit_log)
+
+    with pytest.raises(RuntimeError, match="audit failed"):
+        auth_routes.logout((user, session), db_session)
+
+    saved_session = db_session.get(AuthSession, session.id)
+    assert saved_session is not None
+    assert saved_session.is_active is True
+    assert saved_session.revoked_at is None
 
 
 def test_logout_revokes_session(client: TestClient) -> None:
