@@ -22,14 +22,25 @@ for (const exportedInterface of ['AuditLogEntry', 'AuditLogFilters', 'AuditLogLi
   )
 }
 
-assert.ok(
-  auditApi.includes("apiClient.get<AuditLogListResponse>('/audit/logs'"),
+assert.match(
+  auditApi,
+  /apiClient\s*\.\s*get\s*<\s*AuditLogListResponse\s*>\s*\(\s*['"]\/audit\/logs['"]/,
   'Audit list API should call GET /audit/logs with the list response type'
 )
-assert.ok(
-  auditApi.includes('apiClient.get<AuditLogEntry>(`/audit/logs/${logId}`)'),
+assert.match(
+  auditApi,
+  /apiClient\s*\.\s*get\s*<\s*AuditLogEntry\s*>\s*\(\s*`\/audit\/logs\/\$\{\s*logId\s*\}`/,
   'Audit detail API should call GET /audit/logs/${logId} with the entry type'
 )
 
-assert.doesNotMatch(routerSource, /admin\/logs|\/admin\/logs/, 'Router must not add visible admin logs UI')
-assert.doesNotMatch(appLayout, /admin\/logs|\/admin\/logs/, 'Layout must not add visible admin logs UI')
+const forbiddenVisibleAuditUiPatterns = [
+  { label: 'admin logs route or nav URL', pattern: /\/?admin\/logs\b/ },
+  { label: 'audit logs route or nav URL', pattern: /\/?audit\/logs\b/ },
+  { label: 'audit-logs route name or nav key', pattern: /\baudit-logs\b/ },
+  { label: 'AuditLogs page or component', pattern: /\bAuditLogs[A-Za-z0-9_]*\b/ }
+]
+
+for (const { label, pattern } of forbiddenVisibleAuditUiPatterns) {
+  assert.doesNotMatch(routerSource, pattern, `Router must not add visible audit log UI: ${label}`)
+  assert.doesNotMatch(appLayout, pattern, `Layout must not add visible audit log UI: ${label}`)
+}
