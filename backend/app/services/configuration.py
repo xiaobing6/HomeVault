@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import bad_request
+from app.models.auth import User
 from app.models.configuration import (
     AttributeDefinition,
     AttributeOption,
@@ -49,6 +50,7 @@ from app.schemas.configuration import (
     ResidenceResponse,
     ResidenceUpdate,
 )
+from app.services.audit import record_audit_log
 
 HOME_SPACE_NAME = "我们家"
 
@@ -74,6 +76,14 @@ ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE = "启用住宅名称已存在"
 def commit_or_bad_request(db: Session, message: str) -> None:
     try:
         db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise bad_request(message) from exc
+
+
+def flush_or_bad_request(db: Session, message: str) -> None:
+    try:
+        db.flush()
     except IntegrityError as exc:
         db.rollback()
         raise bad_request(message) from exc
@@ -376,7 +386,11 @@ def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
     )
 
 
-def create_residence(db: Session, payload: ResidenceCreate) -> ResidenceResponse:
+def create_residence(
+    db: Session,
+    payload: ResidenceCreate,
+    actor: User | None = None,
+) -> ResidenceResponse:
     seed = ensure_core_configuration_seed(db)
     assert_active_residence_name_available(db, payload.name)
 
@@ -389,12 +403,26 @@ def create_residence(db: Session, payload: ResidenceCreate) -> ResidenceResponse
         is_active=True,
     )
     db.add(residence)
+    flush_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
+    record_audit_log(
+        db,
+        action="config.residence.create",
+        resource_type="residence",
+        actor=actor,
+        resource_id=residence.id,
+        resource_label=residence.name,
+        metadata={"is_active": residence.is_active},
+    )
     commit_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
     db.refresh(residence)
     return ResidenceResponse.model_validate(residence)
 
 
-def create_location_node(db: Session, payload: LocationNodeCreate) -> LocationNodeResponse:
+def create_location_node(
+    db: Session,
+    payload: LocationNodeCreate,
+    actor: User | None = None,
+) -> LocationNodeResponse:
     residence = db.get(Residence, payload.residence_id)
     if residence is None:
         raise bad_request("住宅不存在")
@@ -411,12 +439,26 @@ def create_location_node(db: Session, payload: LocationNodeCreate) -> LocationNo
         is_active=True,
     )
     db.add(node)
+    db.flush()
+    record_audit_log(
+        db,
+        action="config.location.create",
+        resource_type="location_node",
+        actor=actor,
+        resource_id=node.id,
+        resource_label=node.name,
+        metadata={"residence_id": node.residence_id},
+    )
     db.commit()
     db.refresh(node)
     return LocationNodeResponse.model_validate(node)
 
 
-def create_family_member(db: Session, payload: FamilyMemberCreate) -> FamilyMemberResponse:
+def create_family_member(
+    db: Session,
+    payload: FamilyMemberCreate,
+    actor: User | None = None,
+) -> FamilyMemberResponse:
     home_space = get_or_create_home_space(db)
     member = FamilyMember(
         home_space_id=home_space.id,
@@ -427,12 +469,25 @@ def create_family_member(db: Session, payload: FamilyMemberCreate) -> FamilyMemb
         is_active=True,
     )
     db.add(member)
+    db.flush()
+    record_audit_log(
+        db,
+        action="config.family_member.create",
+        resource_type="family_member",
+        actor=actor,
+        resource_id=member.id,
+        resource_label=member.name,
+    )
     db.commit()
     db.refresh(member)
     return FamilyMemberResponse.model_validate(member)
 
 
-def create_category(db: Session, payload: CategoryCreate) -> CategoryResponse:
+def create_category(
+    db: Session,
+    payload: CategoryCreate,
+    actor: User | None = None,
+) -> CategoryResponse:
     existing = db.scalar(select(Category).where(Category.code == payload.code))
     if existing is not None:
         raise bad_request("分类编码已存在")
@@ -447,6 +502,16 @@ def create_category(db: Session, payload: CategoryCreate) -> CategoryResponse:
         is_active=True,
     )
     db.add(category)
+    flush_or_bad_request(db, "分类编码已存在")
+    record_audit_log(
+        db,
+        action="config.category.create",
+        resource_type="category",
+        actor=actor,
+        resource_id=category.id,
+        resource_label=category.name,
+        metadata={"code": category.code},
+    )
     commit_or_bad_request(db, "分类编码已存在")
     db.refresh(category)
     return CategoryResponse.model_validate(category)
@@ -455,6 +520,7 @@ def create_category(db: Session, payload: CategoryCreate) -> CategoryResponse:
 def create_attribute_definition(
     db: Session,
     payload: AttributeDefinitionCreate,
+    actor: User | None = None,
 ) -> AttributeDefinitionResponse:
     category = db.get(Category, payload.category_id)
     if category is None:
@@ -482,6 +548,16 @@ def create_attribute_definition(
         is_active=True,
     )
     db.add(definition)
+    flush_or_bad_request(db, "字段标识已存在")
+    record_audit_log(
+        db,
+        action="config.attribute_definition.create",
+        resource_type="attribute_definition",
+        actor=actor,
+        resource_id=definition.id,
+        resource_label=definition.name,
+        metadata={"category_id": definition.category_id, "key": definition.key},
+    )
     commit_or_bad_request(db, "字段标识已存在")
     db.refresh(definition)
     return AttributeDefinitionResponse.model_validate(definition)
@@ -497,7 +573,12 @@ def update_home_space(db: Session, payload: HomeSpaceUpdate) -> HomeSpaceRespons
     return HomeSpaceResponse.model_validate(home_space)
 
 
-def update_residence(db: Session, residence_id: int, payload: ResidenceUpdate) -> ResidenceResponse:
+def update_residence(
+    db: Session,
+    residence_id: int,
+    payload: ResidenceUpdate,
+    actor: User | None = None,
+) -> ResidenceResponse:
     residence = db.get(Residence, residence_id)
     if residence is None:
         raise bad_request("Residence not found")
@@ -510,6 +591,15 @@ def update_residence(db: Session, residence_id: int, payload: ResidenceUpdate) -
     residence.address = payload.address
     residence.sort_order = payload.sort_order
     residence.is_active = payload.is_active
+    record_audit_log(
+        db,
+        action="config.residence.update",
+        resource_type="residence",
+        actor=actor,
+        resource_id=residence.id,
+        resource_label=residence.name,
+        metadata={"is_active": residence.is_active},
+    )
     commit_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
     db.refresh(residence)
     return ResidenceResponse.model_validate(residence)

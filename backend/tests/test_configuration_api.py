@@ -2,11 +2,13 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
 from app.core.security import hash_password
 from app.main import app
+from app.models import AuditLog
 from app.models.auth import Role, User
 from app.models.configuration import AttributeOption
 from app.services.seed import seed_auth_baseline
@@ -30,6 +32,51 @@ def login(client: TestClient, username: str = "admin", password: str = "ChangeMe
     response = client.post("/api/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def test_configuration_mutations_write_audit_logs(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+
+    residence = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Audit Home", "description": "", "address": "", "sort_order": 1},
+    )
+    assert residence.status_code == 201
+    residence_id = residence.json()["id"]
+
+    residence_update = client.patch(
+        f"/api/config/residences/{residence_id}",
+        headers=headers,
+        json={
+            "name": "Audit Home",
+            "description": "Updated",
+            "address": "",
+            "sort_order": 1,
+            "is_active": False,
+        },
+    )
+    assert residence_update.status_code == 200
+
+    location = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence_id, "name": "Shelf", "node_type": "area"},
+    )
+    assert location.status_code == 201
+
+    audit_actions = db_session.scalars(
+        select(AuditLog.action)
+        .where(AuditLog.action.like("config.%"))
+        .order_by(AuditLog.id)
+    ).all()
+
+    assert "config.residence.create" in audit_actions
+    assert "config.residence.update" in audit_actions
+    assert "config.location.create" in audit_actions
 
 
 def test_bootstrap_returns_seeded_core_config(client: TestClient) -> None:

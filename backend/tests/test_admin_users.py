@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.api.deps import get_db
 from app.core.security import verify_password
 from app.main import app
+from app.models import AuditLog
 from app.models.auth import AuthSession, User
 from app.schemas.admin import AdminUserCreate, AdminUserUpdate
 from app.services import admin as admin_service
@@ -39,6 +40,59 @@ def login(client: TestClient, username: str = "admin", password: str = "ChangeMe
     response = client.post("/api/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def test_admin_user_mutations_write_audit_logs(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+
+    created = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "audited",
+            "display_name": "Audited",
+            "password": "Audited123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert created.status_code == 201
+    user_id = created.json()["id"]
+
+    updated = client.patch(
+        f"/api/admin/users/{user_id}",
+        headers=headers,
+        json={"display_name": "Audited User", "is_active": False, "role_codes": ["viewer"]},
+    )
+    assert updated.status_code == 200
+
+    reset = client.post(
+        f"/api/admin/users/{user_id}/reset-password",
+        headers=headers,
+        json={"password": "NewAudited123!"},
+    )
+    assert reset.status_code == 200
+
+    audit_logs = db_session.scalars(
+        select(AuditLog)
+        .where(AuditLog.resource_id == str(user_id))
+        .order_by(AuditLog.id)
+    ).all()
+
+    assert [log.action for log in audit_logs] == [
+        "admin.user.create",
+        "admin.user.update",
+        "admin.user.reset_password",
+    ]
+    assert {log.actor_username for log in audit_logs} == {"admin"}
+    assert audit_logs[1].metadata_json == {
+        "changed_fields": ["display_name", "is_active", "role_codes"],
+        "role_codes": ["viewer"],
+        "is_active": False,
+    }
+    assert "password" not in (audit_logs[2].metadata_json or {})
 
 
 def test_admin_can_list_roles_create_update_and_reset_user(

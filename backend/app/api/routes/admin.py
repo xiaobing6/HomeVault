@@ -49,7 +49,7 @@ def create_user(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("users:manage")),
 ) -> AdminUserResponse:
-    return create_user_record(db, payload)
+    return create_user_record(db, payload, actor=user)
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserResponse)
@@ -59,7 +59,7 @@ def update_user(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("users:manage")),
 ) -> AdminUserResponse:
-    return update_user_record(db, user_id, payload)
+    return update_user_record(db, user_id, payload, actor=user)
 
 
 @router.post("/users/{user_id}/reset-password", response_model=AdminUserResponse)
@@ -69,7 +69,7 @@ def reset_password(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("users:manage")),
 ) -> AdminUserResponse:
-    return reset_user_password_record(db, user_id, payload)
+    return reset_user_password_record(db, user_id, payload, actor=user)
 
 
 @router.get("/roles", response_model=list[AdminRoleResponse])

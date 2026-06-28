@@ -142,7 +142,7 @@ def create_residence(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> ResidenceResponse:
-    return create_residence_record(db, payload)
+    return create_residence_record(db, payload, actor=user)
 
 
 @router.patch("/residences/{residence_id}", response_model=ResidenceResponse)
@@ -152,7 +152,7 @@ def update_residence(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> ResidenceResponse:
-    return update_residence_record(db, residence_id, payload)
+    return update_residence_record(db, residence_id, payload, actor=user)
 
 
 @router.post("/location-nodes", response_model=LocationNodeResponse, status_code=status.HTTP_201_CREATED)
@@ -161,7 +161,7 @@ def create_location_node(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> LocationNodeResponse:
-    return create_location_node_record(db, payload)
+    return create_location_node_record(db, payload, actor=user)
 
 
 @router.patch("/location-nodes/{node_id}", response_model=LocationNodeResponse)
@@ -180,7 +180,7 @@ def create_family_member(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> FamilyMemberResponse:
-    return create_family_member_record(db, payload)
+    return create_family_member_record(db, payload, actor=user)
 
 
 @router.patch("/family-members/{member_id}", response_model=FamilyMemberResponse)
@@ -199,7 +199,7 @@ def create_category(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> CategoryResponse:
-    return create_category_record(db, payload)
+    return create_category_record(db, payload, actor=user)
 
 
 @router.patch("/categories/{category_id}", response_model=CategoryResponse)
@@ -222,7 +222,7 @@ def create_attribute_definition(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> AttributeDefinitionResponse:
-    return create_attribute_definition_record(db, payload)
+    return create_attribute_definition_record(db, payload, actor=user)
 
 
 @router.patch("/attribute-definitions/{definition_id}", response_model=AttributeDefinitionResponse)

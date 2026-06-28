@@ -20,6 +20,7 @@ from app.schemas.admin import (
     AdminUserResponse,
     AdminUserUpdate,
 )
+from app.services.audit import record_audit_log
 
 _admin_user_update_lock = RLock()
 
@@ -150,7 +151,7 @@ def list_users(db: Session, query: AdminUserListQuery) -> AdminUserListResponse:
     )
 
 
-def create_user(db: Session, payload: AdminUserCreate) -> AdminUserResponse:
+def create_user(db: Session, payload: AdminUserCreate, actor: User | None = None) -> AdminUserResponse:
     roles_by_code = role_map_by_code(db, payload.role_codes)
     existing = db.scalar(select(User.id).where(User.username == payload.username))
     if existing is not None:
@@ -165,6 +166,16 @@ def create_user(db: Session, payload: AdminUserCreate) -> AdminUserResponse:
     user.roles = [roles_by_code[code] for code in sorted(roles_by_code)]
     db.add(user)
     try:
+        db.flush()
+        record_audit_log(
+            db,
+            action="admin.user.create",
+            resource_type="user",
+            actor=actor,
+            resource_id=user.id,
+            resource_label=user.username,
+            metadata={"role_codes": sorted(roles_by_code)},
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -180,22 +191,52 @@ def get_user_for_admin(db: Session, user_id: int) -> User:
     return user
 
 
-def update_user(db: Session, user_id: int, payload: AdminUserUpdate) -> AdminUserResponse:
+def update_user(
+    db: Session,
+    user_id: int,
+    payload: AdminUserUpdate,
+    actor: User | None = None,
+) -> AdminUserResponse:
     with _admin_user_update_lock:
         user = get_user_for_admin(db, user_id)
         roles_by_code = role_map_by_code(db, payload.role_codes)
         normalized_role_codes = sorted(roles_by_code)
         assert_not_last_active_admin(db, user, payload.is_active, normalized_role_codes)
 
+        changed_fields: list[str] = []
+        if user.display_name != payload.display_name:
+            changed_fields.append("display_name")
+        if user.is_active != payload.is_active:
+            changed_fields.append("is_active")
+        changed_fields.append("role_codes")
+
         user.display_name = payload.display_name
         user.is_active = payload.is_active
         user.roles = [roles_by_code[code] for code in normalized_role_codes]
+        record_audit_log(
+            db,
+            action="admin.user.update",
+            resource_type="user",
+            actor=actor,
+            resource_id=user.id,
+            resource_label=user.username,
+            metadata={
+                "changed_fields": changed_fields,
+                "role_codes": normalized_role_codes,
+                "is_active": user.is_active,
+            },
+        )
         db.commit()
         db.refresh(user)
         return serialize_admin_user(user)
 
 
-def reset_user_password(db: Session, user_id: int, payload: AdminPasswordReset) -> AdminUserResponse:
+def reset_user_password(
+    db: Session,
+    user_id: int,
+    payload: AdminPasswordReset,
+    actor: User | None = None,
+) -> AdminUserResponse:
     user = get_user_for_admin(db, user_id)
     user.password_hash = hash_password(payload.password)
     revoked_at = datetime.now(timezone.utc)
@@ -208,6 +249,15 @@ def reset_user_password(db: Session, user_id: int, payload: AdminPasswordReset) 
     for session in sessions:
         session.is_active = False
         session.revoked_at = revoked_at
+    record_audit_log(
+        db,
+        action="admin.user.reset_password",
+        resource_type="user",
+        actor=actor,
+        resource_id=user.id,
+        resource_label=user.username,
+        metadata={"revoked_session_count": len(sessions)},
+    )
     db.commit()
     db.refresh(user)
     return serialize_admin_user(user)
