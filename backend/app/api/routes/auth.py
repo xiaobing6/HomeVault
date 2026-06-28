@@ -12,6 +12,7 @@ from app.services.auth import (
     revoke_session,
     serialize_current_user,
 )
+from app.services.audit import record_audit_log
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -20,8 +21,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     user = authenticate_user(db, payload.username, payload.password)
     if user is None:
+        record_audit_log(
+            db,
+            action="auth.login",
+            resource_type="auth_session",
+            result="failure",
+            metadata={"attempted_username": payload.username},
+        )
+        db.commit()
         raise unauthorized("账号或密码不正确")
-    access_token, _session = create_login_session(db, user)
+    access_token, session = create_login_session(db, user)
+    record_audit_log(
+        db,
+        actor=user,
+        action="auth.login",
+        resource_type="auth_session",
+        resource_id=session.session_id,
+        resource_label=user.username,
+        result="success",
+    )
+    db.commit()
     return LoginResponse(access_token=access_token, user=serialize_current_user(user))
 
 
@@ -35,6 +54,16 @@ def logout(
     user_and_session: tuple[User, AuthSession] = Depends(get_current_user_and_session),
     db: Session = Depends(get_db),
 ) -> Response:
-    _user, session = user_and_session
+    user, session = user_and_session
     revoke_session(db, session)
+    record_audit_log(
+        db,
+        actor=user,
+        action="auth.logout",
+        resource_type="auth_session",
+        resource_id=session.session_id,
+        resource_label=user.username,
+        result="success",
+    )
+    db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -54,8 +54,7 @@ def create_login_session(db: Session, user: User) -> tuple[str, AuthSession]:
         is_active=True,
     )
     db.add(session)
-    db.commit()
-    db.refresh(session)
+    db.flush()
     token = create_access_token(
         user_id=user.id,
         session_id=session.session_id,
@@ -68,4 +67,3 @@ def create_login_session(db: Session, user: User) -> tuple[str, AuthSession]:
 def revoke_session(db: Session, session: AuthSession) -> None:
     session.is_active = False
     session.revoked_at = datetime.now(timezone.utc)
-    db.commit()
