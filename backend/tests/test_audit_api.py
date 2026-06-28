@@ -59,8 +59,17 @@ def test_admin_can_list_and_view_audit_logs(client: TestClient, db_session: Sess
     assert detail.json()["action"] == "admin.user.create"
 
 
-def test_viewer_without_logs_view_is_forbidden(client: TestClient) -> None:
+def test_viewer_without_logs_view_is_forbidden(client: TestClient, db_session: Session) -> None:
     admin_headers = login(client)
+    record = record_audit_log(
+        db_session,
+        action="admin.user.create",
+        resource_type="user",
+        resource_id=7,
+        resource_label="manager",
+        actor_username="admin",
+    )
+    db_session.commit()
     created = client.post(
         "/api/admin/users",
         headers=admin_headers,
@@ -75,7 +84,7 @@ def test_viewer_without_logs_view_is_forbidden(client: TestClient) -> None:
     viewer_headers = login(client, "viewer", "Viewer123!")
 
     listed = client.get("/api/audit/logs", headers=viewer_headers)
-    detail = client.get("/api/audit/logs/1", headers=viewer_headers)
+    detail = client.get(f"/api/audit/logs/{record.id}", headers=viewer_headers)
     assert listed.status_code == 403
     assert detail.status_code == 403
 
