@@ -1,29 +1,195 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { ElMessage, type FormInstance } from 'element-plus'
+import { Edit, Plus } from '@element-plus/icons-vue'
 
+import { getChineseErrorMessage } from '../../api/client'
+import type { ItemStatus } from '../../api/configuration'
 import { useConfigurationStore } from '../../stores/configuration'
 
 const configuration = useConfigurationStore()
 const { data } = storeToRefs(configuration)
 
+const statusFormRef = ref<FormInstance>()
+const statusEditFormRef = ref<FormInstance>()
+const statusSaving = ref(false)
+const statusEditSaving = ref(false)
+const statusEditOpen = ref(false)
+const editingStatus = ref<ItemStatus | null>(null)
+
+const statusForm = reactive({
+  code: '',
+  name: '',
+  semantic: 'available',
+  sort_order: 0
+})
+
+const statusEditForm = reactive({
+  name: '',
+  semantic: 'available',
+  sort_order: 0,
+  is_active: true
+})
+
+const statusSemanticOptions = ['available', 'away', 'removed', 'missing']
+
 const statuses = computed(() => data.value?.item_statuses ?? [])
 const dictionaryGroups = computed(() => data.value?.dictionary_groups ?? [])
+
+async function validateForm(form?: FormInstance) {
+  if (!form) return false
+  return form.validate().then(() => true).catch(() => false)
+}
+
+function trimStatusForm() {
+  statusForm.code = statusForm.code.trim()
+  statusForm.name = statusForm.name.trim()
+  statusForm.semantic = statusForm.semantic.trim()
+}
+
+function trimStatusEditForm() {
+  statusEditForm.name = statusEditForm.name.trim()
+  statusEditForm.semantic = statusEditForm.semantic.trim()
+}
+
+function openStatusEdit(status: ItemStatus) {
+  editingStatus.value = status
+  Object.assign(statusEditForm, {
+    name: status.name,
+    semantic: status.semantic,
+    sort_order: status.sort_order,
+    is_active: status.is_active
+  })
+  statusEditOpen.value = true
+}
+
+function clearStatusEdit() {
+  editingStatus.value = null
+  Object.assign(statusEditForm, {
+    name: '',
+    semantic: 'available',
+    sort_order: 0,
+    is_active: true
+  })
+}
+
+async function saveItemStatus() {
+  trimStatusForm()
+  const valid = await validateForm(statusFormRef.value)
+  if (!valid) return
+
+  statusSaving.value = true
+  try {
+    await configuration.createItemStatus({
+      code: statusForm.code.trim(),
+      name: statusForm.name.trim(),
+      semantic: statusForm.semantic.trim(),
+      sort_order: Number(statusForm.sort_order) || 0
+    })
+    Object.assign(statusForm, { code: '', name: '', semantic: 'available', sort_order: 0 })
+    ElMessage.success('已保存')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    statusSaving.value = false
+  }
+}
+
+async function updateItemStatus() {
+  trimStatusEditForm()
+  const valid = await validateForm(statusEditFormRef.value)
+  if (!valid || !editingStatus.value) return
+
+  statusEditSaving.value = true
+  try {
+    await configuration.updateItemStatus(editingStatus.value.id, {
+      name: statusEditForm.name.trim(),
+      semantic: statusEditForm.semantic.trim(),
+      sort_order: Number(statusEditForm.sort_order) || 0,
+      is_active: statusEditForm.is_active
+    })
+    statusEditOpen.value = false
+    ElMessage.success('已保存')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    statusEditSaving.value = false
+  }
+}
 </script>
 
 <template>
   <div class="panel-grid two-columns">
     <section class="tool-section">
       <h2>物品状态</h2>
+      <el-form
+        ref="statusFormRef"
+        :model="statusForm"
+        label-position="top"
+        class="compact-form"
+      >
+        <div class="form-row">
+          <el-form-item label="编码" prop="code" :rules="[{ required: true, message: '请输入编码' }]">
+            <el-input v-model="statusForm.code" maxlength="50" />
+          </el-form-item>
+          <el-form-item label="名称" prop="name" :rules="[{ required: true, message: '请输入名称' }]">
+            <el-input v-model="statusForm.name" maxlength="50" />
+          </el-form-item>
+        </div>
+        <div class="form-row">
+          <el-form-item
+            label="语义"
+            prop="semantic"
+            :rules="[{ required: true, message: '请选择语义' }]"
+          >
+            <el-select v-model="statusForm.semantic" class="full-width">
+              <el-option
+                v-for="semantic in statusSemanticOptions"
+                :key="semantic"
+                :label="semantic"
+                :value="semantic"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="排序">
+            <el-input-number
+              v-model="statusForm.sort_order"
+              :min="0"
+              :step="1"
+              controls-position="right"
+              class="full-width"
+            />
+          </el-form-item>
+        </div>
+        <el-button type="primary" :icon="Plus" :loading="statusSaving" @click="saveItemStatus">
+          保存状态
+        </el-button>
+      </el-form>
+
       <el-table :data="statuses" size="small" class="data-table">
         <el-table-column prop="name" label="名称" min-width="120" />
         <el-table-column prop="code" label="编码" min-width="140" />
         <el-table-column prop="semantic" label="语义" min-width="120" />
+        <el-table-column prop="is_active" label="状态" width="92">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.is_active ? 'success' : 'info'">
+              {{ row.is_active ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="is_system" label="系统" width="86">
           <template #default="{ row }">
             <el-tag size="small" :type="row.is_system ? 'info' : 'success'">
               {{ row.is_system ? '是' : '否' }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="92" fixed="right">
+          <template #default="{ row }">
+            <el-button text type="primary" :icon="Edit" @click="openStatusEdit(row)">
+              编辑
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -65,6 +231,68 @@ const dictionaryGroups = computed(() => data.value?.dictionary_groups ?? [])
       </el-table>
     </section>
   </div>
+
+  <el-dialog
+    v-model="statusEditOpen"
+    title="编辑物品状态"
+    width="520px"
+    destroy-on-close
+    @closed="clearStatusEdit"
+  >
+    <el-form
+      ref="statusEditFormRef"
+      :model="statusEditForm"
+      label-position="top"
+      class="compact-form"
+    >
+      <el-form-item label="编码">
+        <el-input :model-value="editingStatus?.code" class="readonly-value" readonly disabled />
+      </el-form-item>
+      <div class="form-row">
+        <el-form-item label="名称" prop="name" :rules="[{ required: true, message: '请输入名称' }]">
+          <el-input v-model="statusEditForm.name" maxlength="50" />
+        </el-form-item>
+        <el-form-item
+          label="语义"
+          prop="semantic"
+          :rules="[{ required: true, message: '请选择语义' }]"
+        >
+          <el-select v-model="statusEditForm.semantic" class="full-width">
+            <el-option
+              v-for="semantic in statusSemanticOptions"
+              :key="semantic"
+              :label="semantic"
+              :value="semantic"
+            />
+          </el-select>
+        </el-form-item>
+      </div>
+      <div class="form-row">
+        <el-form-item label="排序">
+          <el-input-number
+            v-model="statusEditForm.sort_order"
+            :min="0"
+            :step="1"
+            controls-position="right"
+            class="full-width"
+          />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch
+            v-model="statusEditForm.is_active"
+            active-text="启用"
+            inactive-text="停用"
+          />
+        </el-form-item>
+      </div>
+    </el-form>
+    <template #footer>
+      <el-button @click="statusEditOpen = false">取消</el-button>
+      <el-button type="primary" :loading="statusEditSaving" @click="updateItemStatus">
+        保存
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -91,8 +319,22 @@ const dictionaryGroups = computed(() => data.value?.dictionary_groups ?? [])
   font-size: 16px;
 }
 
+.compact-form {
+  margin-bottom: 16px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.full-width {
+  width: 100%;
+}
+
 .data-table {
-  margin-top: 4px;
+  margin-top: 14px;
 }
 
 .nested-table {
@@ -100,8 +342,13 @@ const dictionaryGroups = computed(() => data.value?.dictionary_groups ?? [])
   margin-left: 20px;
 }
 
+.readonly-value {
+  width: 100%;
+}
+
 @media (max-width: 960px) {
-  .two-columns {
+  .two-columns,
+  .form-row {
     grid-template-columns: 1fr;
   }
 }
