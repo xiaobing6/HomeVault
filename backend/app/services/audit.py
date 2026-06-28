@@ -12,13 +12,16 @@ from app.core.errors import not_found
 from app.models import AuditLog, User
 from app.schemas.audit import AuditLogListQuery, AuditLogListResponse, AuditLogResponse
 
-SENSITIVE_METADATA_KEYS = {"password", "token", "access_token", "password_hash"}
+SENSITIVE_METADATA_KEY_PARTS = ("password", "token", "hash", "requestbody")
 
 _DROP = object()
 
 
 def _is_sensitive_key(key: object) -> bool:
-    return isinstance(key, str) and key.lower() in SENSITIVE_METADATA_KEYS
+    if not isinstance(key, str):
+        return False
+    normalized_key = "".join(character for character in key.lower() if character.isalnum())
+    return any(part in normalized_key for part in SENSITIVE_METADATA_KEY_PARTS)
 
 
 def _sanitize_mapping(value: Mapping[object, object]) -> dict[str, Any] | object:

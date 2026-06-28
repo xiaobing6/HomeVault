@@ -55,6 +55,35 @@ def test_record_audit_log_sanitizes_metadata_without_committing(db_session: Sess
     assert persisted_logs[0].id is not None
 
 
+def test_record_audit_log_drops_sensitive_metadata_key_variants(db_session: Session) -> None:
+    actor = create_actor(db_session, "privacy-admin")
+
+    log = record_audit_log(
+        db_session,
+        actor=actor,
+        action="auth.login",
+        resource_type="auth_session",
+        metadata={
+            "refresh_token": "refresh-secret",
+            "api_token": "api-secret",
+            "token_hash": "token-hash",
+            "passwordHash": "password-hash",
+            "request_body": {"password": "Secret123!", "safe": "ignored"},
+            "fullRequestBody": {"token": "nested-secret"},
+            "changed_fields": ["display_name"],
+            "nested": {
+                "accessToken": "nested-token",
+                "safe_key": "safe-value",
+            },
+        },
+    )
+
+    assert log.metadata_json == {
+        "changed_fields": ["display_name"],
+        "nested": {"safe_key": "safe-value"},
+    }
+
+
 def test_list_audit_logs_filters_by_resource_type_and_case_insensitive_search(
     db_session: Session,
 ) -> None:

@@ -59,7 +59,12 @@ def test_admin_can_list_and_view_audit_logs(client: TestClient, db_session: Sess
     assert detail.json()["action"] == "admin.user.create"
 
 
-def test_viewer_without_logs_view_is_forbidden(client: TestClient, db_session: Session) -> None:
+@pytest.mark.parametrize("role_code", ["viewer", "editor"])
+def test_users_without_logs_view_are_forbidden(
+    client: TestClient,
+    db_session: Session,
+    role_code: str,
+) -> None:
     admin_headers = login(client)
     record = record_audit_log(
         db_session,
@@ -74,17 +79,17 @@ def test_viewer_without_logs_view_is_forbidden(client: TestClient, db_session: S
         "/api/admin/users",
         headers=admin_headers,
         json={
-            "username": "viewer",
-            "display_name": "Viewer",
-            "password": "Viewer123!",
-            "role_codes": ["viewer"],
+            "username": role_code,
+            "display_name": role_code.title(),
+            "password": f"{role_code.title()}123!",
+            "role_codes": [role_code],
         },
     )
     assert created.status_code == 201
-    viewer_headers = login(client, "viewer", "Viewer123!")
+    restricted_headers = login(client, role_code, f"{role_code.title()}123!")
 
-    listed = client.get("/api/audit/logs", headers=viewer_headers)
-    detail = client.get(f"/api/audit/logs/{record.id}", headers=viewer_headers)
+    listed = client.get("/api/audit/logs", headers=restricted_headers)
+    detail = client.get(f"/api/audit/logs/{record.id}", headers=restricted_headers)
     assert listed.status_code == 403
     assert detail.status_code == 403
 
