@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { CirclePlus, Edit, Plus } from '@element-plus/icons-vue'
@@ -110,6 +110,8 @@ const selectedCategoryFields = computed(() => selectedCategory.value?.attribute_
 const selectableAttributeDefinitions = computed(() =>
   selectedCategoryFields.value.filter((field) => selectFieldTypes.has(field.field_type))
 )
+const selectedOptionDefinitionIsValid = computed(() => isOptionDefinitionSelectable(optionForm.definition_id))
+const optionCreateDisabled = computed(() => !selectedOptionDefinitionIsValid.value)
 const categoryEditParentOptions = computed<CategoryOption[]>(() =>
   flattenCategoryOptions(
     categories.value,
@@ -117,6 +119,16 @@ const categoryEditParentOptions = computed<CategoryOption[]>(() =>
   )
 )
 const fieldEmptyText = computed(() => (selectedCategory.value ? '暂无字段' : '请选择分类'))
+
+watch(selectableAttributeDefinitions, (fields) => {
+  if (optionForm.definition_id && !fields.some((field) => field.id === optionForm.definition_id)) {
+    optionForm.definition_id = undefined
+  }
+})
+
+function isOptionDefinitionSelectable(definitionId: number | undefined): boolean {
+  return selectableAttributeDefinitions.value.some((field) => field.id === definitionId)
+}
 
 function collectCategoryIds(category: Category): Set<number> {
   const ids = new Set<number>([category.id])
@@ -359,7 +371,7 @@ function clearOptionEdit() {
 async function saveAttributeOption() {
   trimOptionForm()
   const valid = await validateForm(optionFormRef.value)
-  if (!valid || !optionForm.definition_id) return
+  if (!valid || !optionForm.definition_id || !isOptionDefinitionSelectable(optionForm.definition_id)) return
 
   optionSaving.value = true
   try {
@@ -600,10 +612,10 @@ async function updateAttributeOption() {
         </el-form-item>
         <div class="form-row">
           <el-form-item label="选项名称" prop="label" :rules="[{ required: true, message: '请输入选项名称' }]">
-            <el-input v-model="optionForm.label" maxlength="80" />
+            <el-input v-model="optionForm.label" maxlength="80" :disabled="optionCreateDisabled" />
           </el-form-item>
           <el-form-item label="选项值" prop="value" :rules="[{ required: true, message: '请输入选项值' }]">
-            <el-input v-model="optionForm.value" maxlength="80" />
+            <el-input v-model="optionForm.value" maxlength="80" :disabled="optionCreateDisabled" />
           </el-form-item>
         </div>
         <el-form-item label="排序">
@@ -613,9 +625,16 @@ async function updateAttributeOption() {
             :step="1"
             controls-position="right"
             class="full-width"
+            :disabled="optionCreateDisabled"
           />
         </el-form-item>
-        <el-button type="primary" :icon="CirclePlus" :loading="optionSaving" @click="saveAttributeOption">
+        <el-button
+          type="primary"
+          :icon="CirclePlus"
+          :loading="optionSaving"
+          :disabled="optionCreateDisabled"
+          @click="saveAttributeOption"
+        >
           保存选项
         </el-button>
       </el-form>
