@@ -5,7 +5,7 @@ import { Bell, Box, Key, UserFilled } from '@element-plus/icons-vue'
 <template>
   <section>
     <h1 class="page-title">仪表盘</h1>
-    <p class="page-subtitle">集中查看家庭物品、位置、权限和提醒入口，后续阶段会继续补齐审计、管理和批量能力。</p>
+    <p class="page-subtitle">集中查看家庭物品、位置、权限、提醒和操作日志入口，后续阶段将继续补齐批量和导入导出能力。</p>
 
     <div class="summary-grid">
       <el-card shadow="never">
@@ -16,7 +16,7 @@ import { Bell, Box, Key, UserFilled } from '@element-plus/icons-vue'
       <el-card shadow="never">
         <el-icon><UserFilled /></el-icon>
         <strong>角色权限</strong>
-        <span>管理员、编辑者、查看者已预留</span>
+        <span>管理账号启停、密码重置和系统角色分配</span>
       </el-card>
       <el-card shadow="never">
         <el-icon><Bell /></el-icon>
