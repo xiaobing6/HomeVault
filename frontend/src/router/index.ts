@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
         meta: { permission: 'users:manage' }
       },
       {
+        path: 'admin/logs',
+        name: 'audit-logs',
+        component: () => import('../pages/AuditLogsPage.vue'),
+        meta: { permission: 'logs:view' }
+      },
+      {
         path: 'admin/config',
         name: 'core-config',
         component: () => import('../pages/CoreConfigPage.vue'),
