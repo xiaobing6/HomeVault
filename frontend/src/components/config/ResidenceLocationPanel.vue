@@ -16,6 +16,7 @@ interface LocationOption {
 interface TreeNode {
   id: string
   label: string
+  location?: LocationNode
   children?: TreeNode[]
 }
 
@@ -25,10 +26,14 @@ const { data } = storeToRefs(configuration)
 const residenceFormRef = ref<FormInstance>()
 const residenceEditFormRef = ref<FormInstance>()
 const locationFormRef = ref<FormInstance>()
+const locationEditFormRef = ref<FormInstance>()
 const residenceEditOpen = ref(false)
+const locationEditOpen = ref(false)
 const editingResidence = ref<Residence | null>(null)
+const editingLocation = ref<LocationNode | null>(null)
 const residenceSaving = ref(false)
 const locationSaving = ref(false)
+const locationEditSaving = ref(false)
 
 const residenceForm = reactive({
   name: '',
@@ -51,6 +56,16 @@ const locationForm = reactive({
   node_type: 'room'
 })
 
+const locationEditForm = reactive({
+  parent_id: null as number | null,
+  name: '',
+  node_type: 'room',
+  icon: '',
+  sort_order: 0,
+  note: '',
+  is_active: true
+})
+
 const locationTypes = [
   { label: '房间', value: 'room' },
   { label: '区域', value: 'area' },
@@ -67,14 +82,16 @@ const currentResidenceLocations = computed(() =>
   locationTree.value.filter((node) => node.residence_id === locationForm.residence_id)
 )
 
-const parentLocationOptions = computed<LocationOption[]>(() => {
-  const flatten = (nodes: LocationNode[], depth = 0): LocationOption[] =>
-    nodes.flatMap((node) => [
-      { id: node.id, label: `${'　'.repeat(depth)}${node.name}` },
-      ...flatten(node.children ?? [], depth + 1)
-    ])
+const parentLocationOptions = computed<LocationOption[]>(() =>
+  flattenLocationOptions(currentResidenceLocations.value)
+)
 
-  return flatten(currentResidenceLocations.value)
+const locationEditParentOptions = computed<LocationOption[]>(() => {
+  if (!editingLocation.value) return []
+  const residenceNodes = locationTree.value.filter(
+    (node) => node.residence_id === editingLocation.value?.residence_id
+  )
+  return flattenLocationOptions(residenceNodes, collectLocationIds(editingLocation.value))
 })
 
 const groupedLocationTree = computed<TreeNode[]>(() =>
@@ -96,8 +113,29 @@ function toTreeNodes(nodes: LocationNode[]): TreeNode[] {
   return nodes.map((node) => ({
     id: `location-${node.id}`,
     label: `${node.name} · ${node.node_type}`,
+    location: node,
     children: toTreeNodes(node.children ?? [])
   }))
+}
+
+function collectLocationIds(node: LocationNode): Set<number> {
+  const ids = new Set<number>([node.id])
+  for (const child of node.children ?? []) {
+    for (const childId of collectLocationIds(child)) {
+      ids.add(childId)
+    }
+  }
+  return ids
+}
+
+function flattenLocationOptions(nodes: LocationNode[], excludedIds = new Set<number>(), depth = 0): LocationOption[] {
+  return nodes.flatMap((node) => {
+    if (excludedIds.has(node.id)) return []
+    return [
+      { id: node.id, label: `${'  '.repeat(depth)}${node.name}` },
+      ...flattenLocationOptions(node.children ?? [], excludedIds, depth + 1)
+    ]
+  })
 }
 
 async function validateForm(form?: FormInstance) {
@@ -119,6 +157,12 @@ function trimResidenceEditForm() {
 
 function trimLocationForm() {
   locationForm.name = locationForm.name.trim()
+}
+
+function trimLocationEditForm() {
+  locationEditForm.name = locationEditForm.name.trim()
+  locationEditForm.icon = locationEditForm.icon.trim()
+  locationEditForm.note = locationEditForm.note.trim()
 }
 
 async function saveResidence() {
@@ -185,6 +229,58 @@ async function updateResidence() {
     ElMessage.error(getChineseErrorMessage(error))
   } finally {
     residenceSaving.value = false
+  }
+}
+
+function openLocationEdit(location: LocationNode) {
+  editingLocation.value = location
+  Object.assign(locationEditForm, {
+    parent_id: location.parent_id,
+    name: location.name,
+    node_type: location.node_type,
+    icon: location.icon,
+    sort_order: location.sort_order,
+    note: location.note,
+    is_active: location.is_active
+  })
+  locationEditOpen.value = true
+}
+
+function clearLocationEdit() {
+  editingLocation.value = null
+  Object.assign(locationEditForm, {
+    parent_id: null,
+    name: '',
+    node_type: 'room',
+    icon: '',
+    sort_order: 0,
+    note: '',
+    is_active: true
+  })
+}
+
+async function updateLocationNode() {
+  trimLocationEditForm()
+  const valid = await validateForm(locationEditFormRef.value)
+  if (!valid || !editingLocation.value) return
+
+  locationEditSaving.value = true
+  try {
+    await configuration.updateLocationNode(editingLocation.value.id, {
+      parent_id: locationEditForm.parent_id,
+      name: locationEditForm.name.trim(),
+      node_type: locationEditForm.node_type,
+      icon: locationEditForm.icon.trim(),
+      sort_order: Number(locationEditForm.sort_order) || 0,
+      note: locationEditForm.note.trim(),
+      is_active: locationEditForm.is_active
+    })
+    locationEditOpen.value = false
+    ElMessage.success('已保存')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    locationEditSaving.value = false
   }
 }
 
@@ -318,7 +414,25 @@ async function saveLocation() {
           node-key="id"
           default-expand-all
           empty-text="暂无位置"
-        />
+        >
+          <template #default="{ data: nodeData }">
+            <div class="tree-node-row">
+              <span>{{ nodeData.label }}</span>
+              <el-tag v-if="nodeData.location" size="small" :type="nodeData.location.is_active ? 'success' : 'info'">
+                {{ nodeData.location.is_active ? '启用' : '停用' }}
+              </el-tag>
+              <el-button
+                v-if="nodeData.location"
+                text
+                type="primary"
+                :icon="Edit"
+                @click.stop="openLocationEdit(nodeData.location)"
+              >
+                编辑
+              </el-button>
+            </div>
+          </template>
+        </el-tree>
       </div>
     </section>
   </div>
@@ -371,6 +485,77 @@ async function saveLocation() {
       </el-button>
     </template>
   </el-dialog>
+
+  <el-dialog
+    v-model="locationEditOpen"
+    title="编辑位置"
+    width="520px"
+    destroy-on-close
+    @closed="clearLocationEdit"
+  >
+    <el-form
+      ref="locationEditFormRef"
+      :model="locationEditForm"
+      label-position="top"
+      class="compact-form"
+    >
+      <el-form-item label="上级位置">
+        <el-select v-model="locationEditForm.parent_id" class="full-width" clearable>
+          <el-option
+            v-for="location in locationEditParentOptions"
+            :key="location.id"
+            :label="location.label"
+            :value="location.id"
+          />
+        </el-select>
+      </el-form-item>
+      <div class="form-row">
+        <el-form-item label="位置名称" prop="name" :rules="[{ required: true, message: '请输入位置名称' }]">
+          <el-input v-model="locationEditForm.name" maxlength="40" />
+        </el-form-item>
+        <el-form-item label="类型" prop="node_type" :rules="[{ required: true, message: '请选择类型' }]">
+          <el-select v-model="locationEditForm.node_type" class="full-width">
+            <el-option
+              v-for="type in locationTypes"
+              :key="type.value"
+              :label="type.label"
+              :value="type.value"
+            />
+          </el-select>
+        </el-form-item>
+      </div>
+      <div class="form-row">
+        <el-form-item label="图标">
+          <el-input v-model="locationEditForm.icon" maxlength="40" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number
+            v-model="locationEditForm.sort_order"
+            :min="0"
+            :step="1"
+            controls-position="right"
+            class="full-width"
+          />
+        </el-form-item>
+      </div>
+      <el-form-item label="备注">
+        <el-input v-model="locationEditForm.note" type="textarea" :rows="3" maxlength="200" />
+      </el-form-item>
+      <el-form-item label="状态">
+        <el-switch
+          v-model="locationEditForm.is_active"
+          active-text="启用"
+          inactive-text="停用"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="locationEditOpen = false">取消</el-button>
+      <el-button type="primary" :loading="locationEditSaving" @click="updateLocationNode">
+        保存
+      </el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
@@ -414,6 +599,13 @@ async function saveLocation() {
 .data-table,
 .tree-wrap {
   margin-top: 14px;
+}
+
+.tree-node-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .tree-wrap {
