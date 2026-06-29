@@ -4,10 +4,14 @@ import {
   adjustQuantityApi,
   archiveItemApi,
   borrowItemApi,
+  bulkArchiveItemsApi,
+  bulkChangeItemStatusApi,
+  bulkMoveItemsApi,
   changeItemStatusApi,
   createItemApi,
   deleteAttachmentApi,
   deleteImageApi,
+  exportItemsCsvApi,
   fetchItemDetailApi,
   listItemsApi,
   moveItemApi,
@@ -17,9 +21,13 @@ import {
   uploadAttachmentApi,
   uploadImageApi,
   type ArchiveItemRequest,
+  type BulkArchiveItemsRequest,
+  type BulkChangeStatusRequest,
+  type BulkMoveItemsRequest,
   type ChangeStatusRequest,
   type ItemCreateRequest,
   type ItemDetail,
+  type ItemExportRequest,
   type ItemFilters,
   type ItemImageUpdateRequest,
   type ItemSummary,
@@ -162,6 +170,18 @@ export const useInventoryStore = defineStore('inventory', {
     },
     async changeStatus(itemId: number, payload: ChangeStatusRequest) {
       return await this.saveAndRefresh(() => changeItemStatusApi(itemId, payload))
+    },
+    async bulkMoveItems(payload: BulkMoveItemsRequest) {
+      return await this.saveAndRefresh(() => bulkMoveItemsApi(payload))
+    },
+    async bulkChangeStatus(payload: BulkChangeStatusRequest) {
+      return await this.saveAndRefresh(() => bulkChangeItemStatusApi(payload))
+    },
+    async bulkArchiveItems(payload: BulkArchiveItemsRequest) {
+      return await this.saveAndRefresh(() => bulkArchiveItemsApi(payload))
+    },
+    async exportItemsCsv(payload: ItemExportRequest = {}) {
+      return await exportItemsCsvApi(payload)
     },
     async adjustQuantity(itemId: number, payload: QuantityAdjustmentRequest) {
       return await this.saveAndRefresh(() => adjustQuantityApi(itemId, payload))

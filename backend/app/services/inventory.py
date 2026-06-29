@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from io import StringIO
 import json
 from pathlib import Path
 
@@ -34,6 +36,10 @@ from app.models.inventory import (
 from app.models.reminders import Reminder
 from app.schemas.inventory import (
     ArchiveItemRequest,
+    BulkArchiveItemsRequest,
+    BulkChangeStatusRequest,
+    BulkItemOperationResponse,
+    BulkMoveItemsRequest,
     ChangeStatusRequest,
     ItemAttachmentResponse,
     ItemAttributeValueInput,
@@ -43,6 +49,7 @@ from app.schemas.inventory import (
     ItemListResponse,
     ItemImageUpdate,
     ItemImageResponse,
+    ItemExportRequest,
     ItemListQuery,
     ItemLoanResponse,
     ItemMovementResponse,
@@ -118,6 +125,28 @@ def require_item(db: Session, item_id: int) -> Item:
     if item is None:
         raise not_found("\u7269\u54c1\u4e0d\u5b58\u5728")
     return item
+
+
+def require_items(db: Session, item_ids: list[int]) -> list[Item]:
+    items = db.scalars(select(Item).where(Item.id.in_(item_ids))).unique().all()
+    item_by_id = {item.id: item for item in items}
+    missing_ids = [item_id for item_id in item_ids if item_id not in item_by_id]
+    if missing_ids:
+        raise not_found("\u7269\u54c1\u4e0d\u5b58\u5728")
+    return [item_by_id[item_id] for item_id in item_ids]
+
+
+def load_items_for_response(db: Session, item_ids: list[int]) -> list[Item]:
+    items = db.scalars(
+        select(Item)
+        .where(Item.id.in_(item_ids))
+        .options(*item_response_options())
+    ).unique().all()
+    item_by_id = {item.id: item for item in items}
+    missing_ids = [item_id for item_id in item_ids if item_id not in item_by_id]
+    if missing_ids:
+        raise not_found("\u7269\u54c1\u4e0d\u5b58\u5728")
+    return [item_by_id[item_id] for item_id in item_ids]
 
 
 def commit_or_bad_request(db: Session, message: str) -> None:
@@ -859,6 +888,114 @@ def change_item_status(
     return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
+def bulk_move_items(
+    db: Session,
+    payload: BulkMoveItemsRequest,
+    actor_id: int | None = None,
+) -> BulkItemOperationResponse:
+    if payload.location_node_id is None and payload.container_item_id is None:
+        raise bad_request("\u8bf7\u9009\u62e9\u4f4d\u7f6e\u6216\u5bb9\u5668")
+    items = require_items(db, payload.item_ids)
+    placements: list[PlacementTarget] = []
+    for item in items:
+        item_status = require_active_status(db, item.status_id)
+        if is_exit_status(item_status):
+            raise bad_request("\u9000\u51fa\u72b6\u6001\u7684\u7269\u54c1\u4e0d\u80fd\u79fb\u52a8")
+        placements.append(
+            validate_basic_placement(
+                db,
+                item_status,
+                payload.location_node_id,
+                payload.container_item_id,
+                current_item_id=item.id,
+            )
+        )
+
+    for item, placement in zip(items, placements, strict=True):
+        previous_location_node_id = item.location_node_id
+        previous_container_item_id = item.container_item_id
+        previous_status_id = item.status_id
+        item.location_node_id = placement.location_node.id if placement.location_node is not None else None
+        item.container_item_id = placement.container_item.id if placement.container_item is not None else None
+        item.updated_by_id = actor_id
+        add_item_movement(
+            db,
+            item=item,
+            movement_type="move",
+            previous_location_node_id=previous_location_node_id,
+            new_location_node_id=item.location_node_id,
+            previous_container_item_id=previous_container_item_id,
+            new_container_item_id=item.container_item_id,
+            previous_status_id=previous_status_id,
+            new_status_id=item.status_id,
+            reason=payload.reason,
+            note=payload.note,
+            actor_id=actor_id,
+        )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return BulkItemOperationResponse(updated_count=len(payload.item_ids), item_ids=payload.item_ids)
+
+
+def bulk_change_item_status(
+    db: Session,
+    payload: BulkChangeStatusRequest,
+    actor_id: int | None = None,
+) -> BulkItemOperationResponse:
+    items = require_items(db, payload.item_ids)
+    target_status = require_active_status(db, payload.status_id)
+    if not is_exit_status(target_status):
+        for item in items:
+            validate_basic_placement(
+                db,
+                target_status,
+                item.location_node_id,
+                item.container_item_id,
+                current_item_id=item.id,
+            )
+
+    for item in items:
+        previous_location_node_id = item.location_node_id
+        previous_container_item_id = item.container_item_id
+        previous_status_id = item.status_id
+        if is_exit_status(target_status):
+            item.location_node_id = None
+            item.container_item_id = None
+        item.status_id = target_status.id
+        item.updated_by_id = actor_id
+        add_item_movement(
+            db,
+            item=item,
+            movement_type="status",
+            previous_location_node_id=previous_location_node_id,
+            new_location_node_id=item.location_node_id,
+            previous_container_item_id=previous_container_item_id,
+            new_container_item_id=item.container_item_id,
+            previous_status_id=previous_status_id,
+            new_status_id=item.status_id,
+            reason=payload.reason,
+            note=payload.note,
+            actor_id=actor_id,
+        )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return BulkItemOperationResponse(updated_count=len(payload.item_ids), item_ids=payload.item_ids)
+
+
+def bulk_archive_items(
+    db: Session,
+    payload: BulkArchiveItemsRequest,
+    actor_id: int | None = None,
+) -> BulkItemOperationResponse:
+    items = require_items(db, payload.item_ids)
+    archived_at = utcnow()
+    for item in items:
+        item.is_archived = True
+        item.archive_reason = payload.archive_reason
+        item.archived_at = archived_at
+        item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return BulkItemOperationResponse(updated_count=len(payload.item_ids), item_ids=payload.item_ids)
+
+
 def adjust_quantity(
     db: Session,
     item_id: int,
@@ -1052,7 +1189,7 @@ def matches_effective_location(item: Item, query: ItemListQuery) -> bool:
     return True
 
 
-def list_items(db: Session, query: ItemListQuery, include_sensitive: bool = True) -> ItemListResponse:
+def build_item_list_filter_statement(query: ItemListQuery):
     stmt = select(Item)
     if not query.include_archived:
         stmt = stmt.where(Item.is_archived.is_(False))
@@ -1133,7 +1270,11 @@ def list_items(db: Session, query: ItemListQuery, include_sensitive: bool = True
         stmt = stmt.where(overdue_reminder_predicate)
     elif query.has_overdue_reminder is False:
         stmt = stmt.where(~overdue_reminder_predicate)
+    return stmt
 
+
+def list_items(db: Session, query: ItemListQuery, include_sensitive: bool = True) -> ItemListResponse:
+    stmt = build_item_list_filter_statement(query)
     uses_effective_location_filter = query.location_node_id is not None or query.residence_id is not None
     if uses_effective_location_filter:
         sorted_stmt = apply_list_sort(stmt, query.sort).options(*item_response_options())
@@ -1160,6 +1301,77 @@ def list_items(db: Session, query: ItemListQuery, include_sensitive: bool = True
         page=query.page,
         page_size=query.page_size,
     )
+
+
+CSV_EXPORT_COLUMNS = [
+    "id",
+    "name",
+    "description",
+    "category",
+    "status",
+    "quantity",
+    "unit",
+    "owner",
+    "keeper",
+    "residence",
+    "location",
+    "container",
+    "privacy_level",
+    "is_container",
+    "is_archived",
+    "tags",
+    "custom_fields",
+    "created_at",
+    "updated_at",
+]
+
+
+def load_items_for_export(db: Session, payload: ItemExportRequest) -> list[Item]:
+    if payload.item_ids:
+        return load_items_for_response(db, payload.item_ids)
+    query = payload.filters
+    stmt = build_item_list_filter_statement(query)
+    sorted_stmt = apply_list_sort(stmt, query.sort).options(*item_response_options())
+    items = db.scalars(sorted_stmt).unique().all()
+    if query.location_node_id is not None or query.residence_id is not None:
+        return [item for item in items if matches_effective_location(item, query)]
+    return items
+
+
+def export_items_csv(db: Session, payload: ItemExportRequest, include_sensitive: bool = True) -> str:
+    items = load_items_for_export(db, payload)
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=CSV_EXPORT_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    for item in items:
+        detail = build_item_detail_response(item, include_sensitive=include_sensitive)
+        writer.writerow(
+            {
+                "id": detail.id,
+                "name": detail.name,
+                "description": detail.description,
+                "category": detail.category_name,
+                "status": detail.status_name,
+                "quantity": detail.quantity,
+                "unit": detail.unit,
+                "owner": detail.owner_member_name or "",
+                "keeper": detail.keeper_member_name or "",
+                "residence": detail.residence_name or "",
+                "location": detail.location_node_name or "",
+                "container": detail.container_item_name or "",
+                "privacy_level": detail.privacy_level,
+                "is_container": str(detail.is_container).lower(),
+                "is_archived": str(detail.is_archived).lower(),
+                "tags": ", ".join(tag.name for tag in detail.tags),
+                "custom_fields": "; ".join(
+                    f"{attribute.attribute_name}={attribute.value}"
+                    for attribute in detail.attribute_values
+                ),
+                "created_at": detail.created_at.isoformat(),
+                "updated_at": detail.updated_at.isoformat(),
+            }
+        )
+    return output.getvalue()
 
 
 def list_tags(db: Session, search: str | None = None) -> list[TagResponse]:

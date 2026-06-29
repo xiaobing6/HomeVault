@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
@@ -81,7 +83,7 @@ def inventory_ids(db: Session) -> dict[str, int]:
     return {
         "category_id": db.scalar(select(Category.id).where(Category.code == "documents")),
         "in_stock_id": db.scalar(select(ItemStatus.id).where(ItemStatus.code == "in_stock")),
-        "removed_id": db.scalar(select(ItemStatus.id).where(ItemStatus.code == "removed")),
+        "removed_id": db.scalar(select(ItemStatus.id).where(ItemStatus.semantic == "removed").order_by(ItemStatus.id)),
         "shelf_id": db.scalar(select(LocationNode.id).where(LocationNode.name == "Shelf")),
         "drawer_id": db.scalar(select(LocationNode.id).where(LocationNode.name == "Drawer")),
         "member_id": db.scalar(select(FamilyMember.id).where(FamilyMember.name == "Alex")),
@@ -233,6 +235,150 @@ def test_viewer_can_read_but_cannot_write_inventory(client: TestClient, db_sessi
     assert move_response.status_code == 403
     assert upload_response.status_code == 403
     assert archive_response.status_code == 403
+
+
+def test_editor_can_bulk_move_and_change_status_items(client: TestClient, db_session: Session) -> None:
+    headers = login(client, "editor", "Editor123!")
+    ids = inventory_ids(db_session)
+    first = create_item(client, headers, ids, name="First folder", is_container=False)
+    second = create_item(client, headers, ids, name="Second folder", is_container=False)
+
+    moved = client.post(
+        "/api/items/bulk/move",
+        headers=headers,
+        json={
+            "item_ids": [first["id"], second["id"]],
+            "location_node_id": ids["drawer_id"],
+            "reason": "Shelf cleanup",
+        },
+    )
+    changed = client.post(
+        "/api/items/bulk/status",
+        headers=headers,
+        json={
+            "item_ids": [first["id"], second["id"]],
+            "status_id": ids["removed_id"],
+            "reason": "Removed from home",
+        },
+    )
+    first_detail = client.get(f"/api/items/{first['id']}", headers=headers)
+    second_movements = client.get(f"/api/items/{second['id']}/movements", headers=headers)
+
+    assert moved.status_code == 200
+    assert moved.json() == {"updated_count": 2, "item_ids": [first["id"], second["id"]]}
+    assert changed.status_code == 200
+    assert changed.json()["updated_count"] == 2
+    assert first_detail.status_code == 200
+    assert first_detail.json()["status_id"] == ids["removed_id"]
+    assert first_detail.json()["location_node_id"] is None
+    assert second_movements.status_code == 200
+    assert [movement["movement_type"] for movement in second_movements.json()] == ["move", "status"]
+
+
+def test_admin_can_bulk_archive_items(client: TestClient, db_session: Session) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    first = create_item(client, headers, ids, name="Archive first")
+    second = create_item(client, headers, ids, name="Archive second")
+
+    archived = client.post(
+        "/api/items/bulk/archive",
+        headers=headers,
+        json={"item_ids": [first["id"], second["id"], first["id"]], "archive_reason": "Batch cleanup"},
+    )
+    active_list = client.get("/api/items", headers=headers)
+    archived_list = client.get("/api/items", headers=headers, params={"include_archived": True})
+    first_detail = client.get(f"/api/items/{first['id']}", headers=headers)
+    second_detail = client.get(f"/api/items/{second['id']}", headers=headers)
+
+    assert archived.status_code == 200
+    assert archived.json() == {"updated_count": 2, "item_ids": [first["id"], second["id"]]}
+    assert active_list.status_code == 200
+    assert active_list.json()["total"] == 0
+    assert archived_list.status_code == 200
+    assert {item["id"] for item in archived_list.json()["items"]} == {first["id"], second["id"]}
+    assert first_detail.json()["archive_reason"] == "Batch cleanup"
+    assert second_detail.json()["archive_reason"] == "Batch cleanup"
+
+
+def test_viewer_cannot_use_bulk_mutation_apis(client: TestClient, db_session: Session) -> None:
+    admin_headers = login(client)
+    viewer_headers = login(client, "viewer", "Viewer123!")
+    ids = inventory_ids(db_session)
+    item = create_item(client, admin_headers, ids)
+
+    move_response = client.post(
+        "/api/items/bulk/move",
+        headers=viewer_headers,
+        json={"item_ids": [item["id"]], "location_node_id": ids["drawer_id"]},
+    )
+    status_response = client.post(
+        "/api/items/bulk/status",
+        headers=viewer_headers,
+        json={"item_ids": [item["id"]], "status_id": ids["removed_id"]},
+    )
+    archive_response = client.post(
+        "/api/items/bulk/archive",
+        headers=viewer_headers,
+        json={"item_ids": [item["id"]], "archive_reason": "Nope"},
+    )
+
+    assert move_response.status_code == 403
+    assert status_response.status_code == 403
+    assert archive_response.status_code == 403
+
+
+def test_inventory_csv_export_supports_filters_selection_and_privacy(client: TestClient, db_session: Session) -> None:
+    admin_headers = login(client)
+    editor_headers = login(client, "editor", "Editor123!")
+    ids = inventory_ids(db_session)
+    db_session.add(
+        AttributeDefinition(
+            category_id=ids["category_id"],
+            key="passport_number",
+            name="Passport number",
+            field_type="text",
+            privacy_level="sensitive",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+    sensitive_definition = db_session.scalar(
+        select(AttributeDefinition).where(AttributeDefinition.key == "passport_number")
+    )
+    assert sensitive_definition is not None
+    normal = create_item(client, admin_headers, ids, name="Book archive", description="Public notes")
+    sensitive = create_item(
+        client,
+        admin_headers,
+        ids,
+        name="Passport folder",
+        description="Safe combination 12-34-56",
+        privacy_level="sensitive",
+        attribute_values=[{"attribute_definition_id": sensitive_definition.id, "value": "P1234567"}],
+    )
+
+    filtered = client.post(
+        "/api/items/export.csv",
+        headers=admin_headers,
+        json={"filters": {"search": "Book"}},
+    )
+    selected = client.post(
+        "/api/items/export.csv",
+        headers=editor_headers,
+        json={"item_ids": [normal["id"], sensitive["id"]]},
+    )
+
+    assert filtered.status_code == 200
+    assert filtered.headers["content-type"].startswith("text/csv")
+    filtered_rows = list(csv.DictReader(StringIO(filtered.text)))
+    assert [row["name"] for row in filtered_rows] == ["Book archive"]
+
+    assert selected.status_code == 200
+    rows = {row["name"]: row for row in csv.DictReader(StringIO(selected.text))}
+    assert rows["Book archive"]["description"] == "Public notes"
+    assert rows["Passport folder"]["description"] == "******"
+    assert rows["Passport folder"]["custom_fields"] == "Passport number=******"
 
 
 def test_non_admin_inventory_reads_redact_sensitive_content(client: TestClient, db_session: Session) -> None:

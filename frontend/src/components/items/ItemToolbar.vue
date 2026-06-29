@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
-import { Grid, List, Plus, Search } from '@element-plus/icons-vue'
+import { Download, Grid, List, Operation, Plus, Search } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   search?: string | null
   viewMode: 'cards' | 'table'
   sort?: string
   canCreate: boolean
+  canEdit: boolean
+  canArchive: boolean
+  selectedCount: number
+  exporting?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -15,6 +19,11 @@ const emit = defineEmits<{
   'update:sort': [value: string]
   search: []
   'add-item': []
+  'bulk-move': []
+  'bulk-status': []
+  'bulk-archive': []
+  'export-selected': []
+  'export-filtered': []
 }>()
 
 const localSearch = ref(props.search ?? '')
@@ -90,6 +99,39 @@ function submitSearchNow() {
           :value="option.value"
         />
       </el-select>
+
+      <el-dropdown
+        :disabled="selectedCount === 0 || (!canEdit && !canArchive)"
+        trigger="click"
+      >
+        <el-button :icon="Operation" :disabled="selectedCount === 0 || (!canEdit && !canArchive)">
+          批量 {{ selectedCount ? `(${selectedCount})` : '' }}
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-if="canEdit" @click="emit('bulk-move')">批量移动</el-dropdown-item>
+            <el-dropdown-item v-if="canEdit" @click="emit('bulk-status')">批量改状态</el-dropdown-item>
+            <el-dropdown-item v-if="canArchive" divided @click="emit('bulk-archive')">批量归档</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+
+      <el-dropdown trigger="click">
+        <el-button :icon="Download" :loading="exporting">
+          导出
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item @click="emit('export-filtered')">导出当前筛选</el-dropdown-item>
+            <el-dropdown-item
+              :disabled="selectedCount === 0"
+              @click="selectedCount > 0 && emit('export-selected')"
+            >
+              导出已选
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
 
       <el-button v-if="canCreate" type="primary" :icon="Plus" @click="emit('add-item')">
         新增

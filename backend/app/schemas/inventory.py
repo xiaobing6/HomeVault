@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 PrivacyLevel = Literal["normal", "sensitive"]
@@ -275,6 +275,55 @@ class LoanReturn(PlacementPayload):
 
 class ArchiveItemRequest(RequestModel):
     archive_reason: str = Field(default="", max_length=255)
+
+
+class ItemIdBatchMixin(RequestModel):
+    item_ids: list[int] = Field(min_length=1, max_length=200)
+
+    @field_validator("item_ids")
+    @classmethod
+    def validate_item_ids(cls, item_ids: list[int]) -> list[int]:
+        seen: set[int] = set()
+        deduped: list[int] = []
+        for item_id in item_ids:
+            if item_id <= 0:
+                raise ValueError("物品不存在")
+            if item_id not in seen:
+                seen.add(item_id)
+                deduped.append(item_id)
+        return deduped
+
+
+class BulkMoveItemsRequest(ItemIdBatchMixin, PlacementPayload):
+    reason: str = Field(default="", max_length=255)
+    note: str = ""
+
+
+class BulkChangeStatusRequest(ItemIdBatchMixin):
+    status_id: int
+    reason: str = Field(default="", max_length=255)
+    note: str = ""
+
+
+class BulkArchiveItemsRequest(ItemIdBatchMixin):
+    archive_reason: str = Field(default="", max_length=255)
+
+
+class BulkItemOperationResponse(ResponseModel):
+    updated_count: int
+    item_ids: list[int]
+
+
+class ItemExportRequest(RequestModel):
+    item_ids: list[int] | None = Field(default=None, max_length=200)
+    filters: ItemListQuery = Field(default_factory=ItemListQuery)
+
+    @field_validator("item_ids")
+    @classmethod
+    def validate_optional_item_ids(cls, item_ids: list[int] | None) -> list[int] | None:
+        if item_ids is None:
+            return None
+        return ItemIdBatchMixin(item_ids=item_ids).item_ids
 
 
 class ItemImageUpdate(RequestModel):

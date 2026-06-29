@@ -248,6 +248,29 @@ export interface ArchiveItemRequest {
   archive_reason?: string
 }
 
+export interface BulkItemOperationResponse {
+  updated_count: number
+  item_ids: number[]
+}
+
+export interface BulkMoveItemsRequest extends MoveItemRequest {
+  item_ids: number[]
+}
+
+export interface BulkChangeStatusRequest extends ChangeStatusRequest {
+  item_ids: number[]
+}
+
+export interface BulkArchiveItemsRequest {
+  item_ids: number[]
+  archive_reason?: string
+}
+
+export interface ItemExportRequest {
+  item_ids?: number[] | null
+  filters?: ItemFilters
+}
+
 export interface ItemImageUpdateRequest {
   is_primary?: boolean | null
   sort_order?: number | null
@@ -295,6 +318,34 @@ export async function changeItemStatusApi(
   payload: ChangeStatusRequest
 ): Promise<ItemDetail> {
   const response = await apiClient.post<ItemDetail>(`/items/${itemId}/status`, payload)
+  return response.data
+}
+
+export async function bulkMoveItemsApi(
+  payload: BulkMoveItemsRequest
+): Promise<BulkItemOperationResponse> {
+  const response = await apiClient.post<BulkItemOperationResponse>('/items/bulk/move', payload)
+  return response.data
+}
+
+export async function bulkChangeItemStatusApi(
+  payload: BulkChangeStatusRequest
+): Promise<BulkItemOperationResponse> {
+  const response = await apiClient.post<BulkItemOperationResponse>('/items/bulk/status', payload)
+  return response.data
+}
+
+export async function bulkArchiveItemsApi(
+  payload: BulkArchiveItemsRequest
+): Promise<BulkItemOperationResponse> {
+  const response = await apiClient.post<BulkItemOperationResponse>('/items/bulk/archive', payload)
+  return response.data
+}
+
+export async function exportItemsCsvApi(payload: ItemExportRequest = {}): Promise<Blob> {
+  const response = await apiClient.post<Blob>('/items/export.csv', payload, {
+    responseType: 'blob'
+  })
   return response.data
 }
 

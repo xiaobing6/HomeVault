@@ -1,24 +1,51 @@
 <script setup lang="ts">
+import { ref, watch } from 'vue'
+import type { TableInstance } from 'element-plus'
 import type { ItemSummary } from '../../api/inventory'
 
-defineProps<{
+const props = defineProps<{
   items: ItemSummary[]
+  selectedItemIds?: number[]
 }>()
 
 const emit = defineEmits<{
   'open-detail': [itemId: number]
+  'selection-change': [items: ItemSummary[]]
 }>()
+
+const tableRef = ref<TableInstance>()
+
+function handleRowClick(row: ItemSummary, column?: { type?: string }) {
+  if (column?.type === 'selection') return
+  emit('open-detail', row.id)
+}
+
+watch(
+  [() => props.items, () => props.selectedItemIds],
+  () => {
+    const table = tableRef.value
+    if (!table) return
+    const selectedIds = new Set(props.selectedItemIds ?? [])
+    props.items.forEach((item) => {
+      table.toggleRowSelection(item, selectedIds.has(item.id))
+    })
+  },
+  { flush: 'post', deep: true }
+)
 </script>
 
 <template>
   <el-table
+    ref="tableRef"
     :data="items"
     row-key="id"
     size="small"
     class="item-table"
     empty-text="还没有物品"
-    @row-click="(row: ItemSummary) => emit('open-detail', row.id)"
+    @selection-change="(selection: ItemSummary[]) => emit('selection-change', selection)"
+    @row-click="handleRowClick"
   >
+    <el-table-column type="selection" width="48" reserve-selection />
     <el-table-column label="物品" min-width="190" show-overflow-tooltip>
       <template #default="{ row }">
         <div class="name-cell">
