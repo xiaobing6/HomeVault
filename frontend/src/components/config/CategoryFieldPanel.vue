@@ -5,7 +5,13 @@ import { ElMessage, type FormInstance } from 'element-plus'
 import { CirclePlus, Edit, Plus } from '@element-plus/icons-vue'
 
 import { getChineseErrorMessage } from '../../api/client'
-import type { AttributeDefinition, AttributeOption, Category } from '../../api/configuration'
+import type {
+  AttributeDefinition,
+  AttributeFieldType,
+  AttributeOption,
+  Category,
+  PrivacyLevel
+} from '../../api/configuration'
 import { useConfigurationStore } from '../../stores/configuration'
 
 interface CategoryOption {
@@ -54,16 +60,17 @@ const fieldForm = reactive({
   category_id: undefined as number | undefined,
   key: '',
   name: '',
-  field_type: 'text',
+  field_type: 'text' as AttributeFieldType,
+  privacy_level: 'normal' as PrivacyLevel,
   is_required: false,
   is_filterable: false
 })
 
 const fieldEditForm = reactive({
   name: '',
-  field_type: 'text',
+  field_type: 'text' as AttributeFieldType,
   default_value: '',
-  privacy_level: 'normal',
+  privacy_level: 'normal' as PrivacyLevel,
   is_required: false,
   is_filterable: false,
   sort_order: 0,
@@ -83,7 +90,7 @@ const optionEditForm = reactive({
   is_active: true
 })
 
-const fieldTypes = [
+const fieldTypes: AttributeFieldType[] = [
   'text',
   'long_text',
   'number',
@@ -95,8 +102,12 @@ const fieldTypes = [
   'boolean',
   'url',
   'attachment',
-  'encrypted_text',
   'reminder_date'
+]
+
+const privacyOptions: { label: string; value: PrivacyLevel }[] = [
+  { label: '普通', value: 'normal' },
+  { label: '敏感', value: 'sensitive' }
 ]
 
 const selectFieldTypes = new Set(['single_select', 'multi_select'])
@@ -183,7 +194,6 @@ function trimFieldForm() {
 function trimFieldEditForm() {
   fieldEditForm.name = fieldEditForm.name.trim()
   fieldEditForm.default_value = fieldEditForm.default_value.trim()
-  fieldEditForm.privacy_level = fieldEditForm.privacy_level.trim()
 }
 
 function trimOptionForm() {
@@ -276,6 +286,7 @@ async function saveField() {
       key: fieldForm.key.trim(),
       name: fieldForm.name.trim(),
       field_type: fieldForm.field_type,
+      privacy_level: fieldForm.privacy_level,
       is_required: fieldForm.is_required,
       is_filterable: fieldForm.is_filterable
     })
@@ -283,6 +294,7 @@ async function saveField() {
       key: '',
       name: '',
       field_type: 'text',
+      privacy_level: 'normal',
       is_required: false,
       is_filterable: false
     })
@@ -334,7 +346,7 @@ async function updateAttributeDefinition() {
       name: fieldEditForm.name.trim(),
       field_type: fieldEditForm.field_type,
       default_value: fieldEditForm.default_value.trim(),
-      privacy_level: fieldEditForm.privacy_level.trim() || 'normal',
+      privacy_level: fieldEditForm.privacy_level,
       is_required: fieldEditForm.is_required,
       is_filterable: fieldEditForm.is_filterable,
       sort_order: Number(fieldEditForm.sort_order) || 0,
@@ -509,6 +521,16 @@ async function updateAttributeOption() {
         >
           <el-select v-model="fieldForm.field_type" class="full-width">
             <el-option v-for="type in fieldTypes" :key="type" :label="type" :value="type" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="隐私级别">
+          <el-select v-model="fieldForm.privacy_level" class="full-width">
+            <el-option
+              v-for="option in privacyOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
           </el-select>
         </el-form-item>
         <div class="switch-row">
@@ -731,7 +753,14 @@ async function updateAttributeOption() {
           <el-input v-model="fieldEditForm.default_value" maxlength="120" />
         </el-form-item>
         <el-form-item label="隐私级别">
-          <el-input v-model="fieldEditForm.privacy_level" maxlength="40" />
+          <el-select v-model="fieldEditForm.privacy_level" class="full-width">
+            <el-option
+              v-for="option in privacyOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
         </el-form-item>
       </div>
       <div class="form-row">

@@ -14,7 +14,8 @@ from app.core.config import get_settings
 from app.core.security import hash_password
 from app.main import app
 from app.models.auth import Role, User
-from app.models.configuration import Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
+from app.models.configuration import AttributeDefinition, Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
+from app.models.inventory import Item
 from app.services.reminders import server_today
 from app.services.seed import seed_auth_baseline
 
@@ -232,6 +233,105 @@ def test_viewer_can_read_but_cannot_write_inventory(client: TestClient, db_sessi
     assert move_response.status_code == 403
     assert upload_response.status_code == 403
     assert archive_response.status_code == 403
+
+
+def test_non_admin_inventory_reads_redact_sensitive_content(client: TestClient, db_session: Session) -> None:
+    admin_headers = login(client)
+    editor_headers = login(client, "editor", "Editor123!")
+    ids = inventory_ids(db_session)
+    db_session.add(
+        AttributeDefinition(
+            category_id=ids["category_id"],
+            key="passport_number",
+            name="Passport number",
+            field_type="text",
+            privacy_level="sensitive",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+    sensitive_definition = db_session.scalar(
+        select(AttributeDefinition).where(AttributeDefinition.key == "passport_number")
+    )
+    assert sensitive_definition is not None
+
+    item = create_item(
+        client,
+        admin_headers,
+        ids,
+        description="Safe combination 12-34-56",
+        privacy_level="sensitive",
+        attribute_values=[
+            {"attribute_definition_id": sensitive_definition.id, "value": "P1234567"},
+        ],
+    )
+    image = client.post(
+        f"/api/items/{item['id']}/images",
+        headers=admin_headers,
+        files={"file": ("passport.png", PNG_BYTES, "image/png")},
+        data={"is_primary": "true"},
+    )
+    attachment = client.post(
+        f"/api/items/{item['id']}/attachments",
+        headers=admin_headers,
+        files={"file": ("contract.pdf", b"%PDF-1.7\n", "application/pdf")},
+    )
+    assert image.status_code == 201
+    assert attachment.status_code == 201
+
+    admin_detail = client.get(f"/api/items/{item['id']}", headers=admin_headers)
+    editor_list = client.get("/api/items", headers=editor_headers)
+    editor_detail = client.get(f"/api/items/{item['id']}", headers=editor_headers)
+    editor_image = client.get(
+        f"/api/items/{item['id']}/images/{image.json()['id']}/file",
+        headers=editor_headers,
+    )
+    editor_attachment = client.get(
+        f"/api/items/{item['id']}/attachments/{attachment.json()['id']}/download",
+        headers=editor_headers,
+    )
+
+    assert admin_detail.status_code == 200
+    assert admin_detail.json()["description"] == "Safe combination 12-34-56"
+    assert admin_detail.json()["attribute_values"][0]["value"] == "P1234567"
+    assert admin_detail.json()["images"][0]["url"]
+    assert admin_detail.json()["attachments"][0]["download_url"]
+    assert editor_list.status_code == 200
+    assert editor_list.json()["items"][0]["description"] == "******"
+    assert editor_list.json()["items"][0]["primary_image_url"] is None
+    assert editor_detail.status_code == 200
+    assert editor_detail.json()["description"] == "******"
+    assert editor_detail.json()["attribute_values"][0]["value"] == "******"
+    assert editor_detail.json()["images"] == []
+    assert editor_detail.json()["attachments"] == []
+    assert editor_image.status_code == 404
+    assert editor_attachment.status_code == 404
+
+
+def test_legacy_private_privacy_level_is_treated_as_sensitive(client: TestClient, db_session: Session) -> None:
+    admin_headers = login(client)
+    editor_headers = login(client, "editor", "Editor123!")
+    ids = inventory_ids(db_session)
+    item = create_item(
+        client,
+        admin_headers,
+        ids,
+        description="Legacy private description",
+    )
+    db_item = db_session.get(Item, item["id"])
+    assert db_item is not None
+    db_item.privacy_level = "private"
+    db_session.commit()
+
+    admin_detail = client.get(f"/api/items/{item['id']}", headers=admin_headers)
+    editor_detail = client.get(f"/api/items/{item['id']}", headers=editor_headers)
+
+    assert admin_detail.status_code == 200
+    assert admin_detail.json()["privacy_level"] == "sensitive"
+    assert admin_detail.json()["description"] == "Legacy private description"
+    assert editor_detail.status_code == 200
+    assert editor_detail.json()["privacy_level"] == "sensitive"
+    assert editor_detail.json()["description"] == "******"
 
 
 def test_inventory_api_rejects_container_cycle(client: TestClient, db_session: Session) -> None:

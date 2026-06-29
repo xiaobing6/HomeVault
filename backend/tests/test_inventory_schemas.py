@@ -32,6 +32,16 @@ def test_item_list_query_defaults_hide_archived_items() -> None:
     assert ItemListQuery().page_size == 20
 
 
+def test_item_privacy_level_accepts_only_normal_or_sensitive() -> None:
+    assert ItemCreate(name="Safe", category_id=1, status_id=1, privacy_level="sensitive").privacy_level == "sensitive"
+
+    with pytest.raises(ValidationError):
+        ItemCreate(name="Unsafe", category_id=1, status_id=1, privacy_level="private")
+
+    with pytest.raises(ValidationError):
+        ItemUpdate(privacy_level="encrypted")
+
+
 def test_item_list_query_rejects_invalid_page_bounds() -> None:
     with pytest.raises(ValidationError):
         ItemListQuery(page=0)

@@ -56,13 +56,17 @@ ARCHIVE_PERMISSION = "items:archive"
 router = APIRouter(tags=["inventory"])
 
 
+def can_view_sensitive(user: User) -> bool:
+    return any(role.code == "admin" for role in user.roles)
+
+
 @router.get("/items", response_model=ItemListResponse)
 def items(
     query: ItemListQuery = Depends(),
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(READ_PERMISSION)),
 ) -> ItemListResponse:
-    return list_items(db, query)
+    return list_items(db, query, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items", response_model=ItemDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -71,7 +75,7 @@ def create_inventory_item(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(CREATE_PERMISSION)),
 ) -> ItemDetailResponse:
-    return create_item(db, payload, actor_id=user.id)
+    return create_item(db, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.get("/items/{item_id}", response_model=ItemDetailResponse)
@@ -80,7 +84,7 @@ def item_detail(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(READ_PERMISSION)),
 ) -> ItemDetailResponse:
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=can_view_sensitive(user))
 
 
 @router.patch("/items/{item_id}", response_model=ItemDetailResponse)
@@ -90,7 +94,7 @@ def update_inventory_item(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return update_item(db, item_id, payload, actor_id=user.id)
+    return update_item(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/archive", response_model=ItemDetailResponse)
@@ -100,7 +104,7 @@ def archive_inventory_item(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(ARCHIVE_PERMISSION)),
 ) -> ItemDetailResponse:
-    return archive_item(db, item_id, payload, actor_id=user.id)
+    return archive_item(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/move", response_model=ItemDetailResponse)
@@ -110,7 +114,7 @@ def move_inventory_item(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return move_item(db, item_id, payload, actor_id=user.id)
+    return move_item(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/status", response_model=ItemDetailResponse)
@@ -120,7 +124,7 @@ def change_inventory_item_status(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return change_item_status(db, item_id, payload, actor_id=user.id)
+    return change_item_status(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/quantity-adjustments", response_model=ItemDetailResponse)
@@ -130,7 +134,7 @@ def adjust_inventory_item_quantity(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return adjust_quantity(db, item_id, payload, actor_id=user.id)
+    return adjust_quantity(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.get("/items/{item_id}/quantity-adjustments", response_model=list[ItemQuantityChangeResponse])
@@ -149,7 +153,7 @@ def create_inventory_item_loan(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return create_loan(db, item_id, payload, actor_id=user.id)
+    return create_loan(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/loans/{loan_id}/return", response_model=ItemDetailResponse)
@@ -160,7 +164,7 @@ def return_inventory_item_loan(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return return_loan(db, item_id, loan_id, payload, actor_id=user.id)
+    return return_loan(db, item_id, loan_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.get("/items/{item_id}/movements", response_model=list[ItemMovementResponse])
@@ -180,7 +184,14 @@ async def upload_inventory_item_image(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemImageResponse:
-    return await add_item_image(db, item_id, file, is_primary=is_primary, actor_id=user.id)
+    return await add_item_image(
+        db,
+        item_id,
+        file,
+        is_primary=is_primary,
+        actor_id=user.id,
+        include_sensitive=can_view_sensitive(user),
+    )
 
 
 @router.get("/items/{item_id}/images/{image_id}/file")
@@ -190,7 +201,7 @@ def download_inventory_item_image(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(READ_PERMISSION)),
 ) -> FileResponse:
-    media_file = get_item_image_file(db, item_id, image_id)
+    media_file = get_item_image_file(db, item_id, image_id, include_sensitive=can_view_sensitive(user))
     return FileResponse(
         media_file.path,
         media_type=media_file.content_type,
@@ -207,7 +218,14 @@ def update_inventory_item_image(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemImageResponse:
-    return update_item_image_metadata(db, item_id, image_id, payload, actor_id=user.id)
+    return update_item_image_metadata(
+        db,
+        item_id,
+        image_id,
+        payload,
+        actor_id=user.id,
+        include_sensitive=can_view_sensitive(user),
+    )
 
 
 @router.delete("/items/{item_id}/images/{image_id}", response_model=ItemDetailResponse)
@@ -217,7 +235,7 @@ def delete_inventory_item_image(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return archive_item_image(db, item_id, image_id, actor_id=user.id)
+    return archive_item_image(db, item_id, image_id, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/attachments", response_model=ItemAttachmentResponse, status_code=status.HTTP_201_CREATED)
@@ -227,7 +245,7 @@ async def upload_inventory_item_attachment(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemAttachmentResponse:
-    return await add_item_attachment(db, item_id, file, actor_id=user.id)
+    return await add_item_attachment(db, item_id, file, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.get("/items/{item_id}/attachments/{attachment_id}/download")
@@ -237,7 +255,7 @@ def download_inventory_item_attachment(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(READ_PERMISSION)),
 ) -> FileResponse:
-    media_file = get_item_attachment_file(db, item_id, attachment_id)
+    media_file = get_item_attachment_file(db, item_id, attachment_id, include_sensitive=can_view_sensitive(user))
     return FileResponse(
         media_file.path,
         media_type=media_file.content_type,
@@ -252,7 +270,13 @@ def delete_inventory_item_attachment(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(EDIT_PERMISSION)),
 ) -> ItemDetailResponse:
-    return archive_item_attachment(db, item_id, attachment_id, actor_id=user.id)
+    return archive_item_attachment(
+        db,
+        item_id,
+        attachment_id,
+        actor_id=user.id,
+        include_sensitive=can_view_sensitive(user),
+    )
 
 
 @router.get("/tags", response_model=list[TagResponse])

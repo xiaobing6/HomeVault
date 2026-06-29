@@ -14,6 +14,7 @@ const residenceLocationPanel = readSource('src/components/config/ResidenceLocati
 const familyMemberPanel = readSource('src/components/config/FamilyMemberPanel.vue')
 const categoryFieldPanel = readSource('src/components/config/CategoryFieldPanel.vue')
 const dictionaryPanel = readSource('src/components/config/DictionaryPanel.vue')
+const customFieldInputs = readSource('src/components/items/CustomFieldInputs.vue')
 
 assert.match(
   residenceLocationPanel,
@@ -96,6 +97,36 @@ assert.match(
   categoryFieldPanel,
   /<el-switch[\s\S]*v-model="fieldEditForm\.is_active"/,
   'Field edit dialog should expose active state with a switch'
+)
+assert.match(
+  categoryFieldPanel,
+  /<el-select[^>]*v-model="fieldEditForm\.privacy_level"/,
+  'Field privacy level should be selected from fixed options'
+)
+assert.match(
+  categoryFieldPanel,
+  /<el-select[^>]*v-model="fieldForm\.privacy_level"/,
+  'New field privacy level should be selected from fixed options'
+)
+assert.doesNotMatch(
+  categoryFieldPanel,
+  /<el-input[^>]*v-model="fieldEditForm\.privacy_level"/,
+  'Field privacy level should not be free-form text'
+)
+assert.doesNotMatch(
+  categoryFieldPanel,
+  /<el-input[^>]*v-model="fieldForm\.privacy_level"/,
+  'New field privacy level should not be free-form text'
+)
+assert.doesNotMatch(
+  categoryFieldPanel,
+  /encrypted_text/,
+  'Encrypted text field type should be removed from field configuration options'
+)
+assert.doesNotMatch(
+  customFieldInputs,
+  /encrypted_text/,
+  'Encrypted text field type should not have a custom input renderer'
 )
 assert.match(
   categoryFieldPanel,

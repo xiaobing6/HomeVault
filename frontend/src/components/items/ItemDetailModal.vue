@@ -62,8 +62,7 @@ const placementText = computed(() => {
 
 const privacyLabel = computed(() => {
   const level = props.item?.privacy_level
-  if (level === 'private') return '私密'
-  if (level === 'encrypted') return '加密'
+  if (level === 'sensitive') return '敏感'
   return '普通'
 })
 

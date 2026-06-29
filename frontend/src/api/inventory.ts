@@ -1,5 +1,7 @@
 import { apiClient } from './client'
 
+export type PrivacyLevel = 'normal' | 'sensitive'
+
 export interface Tag {
   id: number
   name: string
@@ -123,7 +125,7 @@ export interface ItemSummary {
   container_item_id: number | null
   container_item_name: string | null
   is_container: boolean
-  privacy_level: string
+  privacy_level: PrivacyLevel
   is_archived: boolean
   primary_image_url: string | null
   tags: Tag[]
@@ -190,7 +192,7 @@ export interface ItemCreateRequest {
   location_node_id?: number | null
   container_item_id?: number | null
   is_container?: boolean
-  privacy_level?: string
+  privacy_level?: PrivacyLevel
   attribute_values?: ItemAttributeValueInput[]
   tags?: string[]
 }
@@ -203,7 +205,7 @@ export interface ItemUpdateRequest {
   owner_member_id?: number | null
   keeper_member_id?: number | null
   is_container?: boolean
-  privacy_level?: string
+  privacy_level?: PrivacyLevel
   attribute_values?: ItemAttributeValueInput[] | null
   tags?: string[] | null
 }

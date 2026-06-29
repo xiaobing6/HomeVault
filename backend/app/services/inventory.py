@@ -73,6 +73,10 @@ from app.services.reminders import (
     server_today,
     sync_loan_return_reminder,
 )
+from app.services.privacy import (
+    is_sensitive_privacy_level,
+    normalize_privacy_level,
+)
 
 try:
     from app.core.errors import not_found
@@ -85,6 +89,7 @@ except ImportError:
 MAX_CONTAINER_DEPTH = 5
 EXIT_STATUS_SEMANTICS = {"removed", "missing", "consumed", "retired", "lost", "disposed"}
 INITIAL_QUANTITY_REASON = "\u521d\u59cb\u6570\u91cf"
+REDACTED_VALUE = "******"
 
 
 @dataclass(frozen=True)
@@ -441,7 +446,12 @@ def parse_multi_select_value(definition: AttributeDefinition, raw_value: str) ->
     return [item.strip() for item in stripped_value.split(",") if item.strip()]
 
 
-def create_item(db: Session, payload: ItemCreate, actor_id: int | None = None) -> ItemDetailResponse:
+def create_item(
+    db: Session,
+    payload: ItemCreate,
+    actor_id: int | None = None,
+    include_sensitive: bool = True,
+) -> ItemDetailResponse:
     name = payload.name.strip()
     if name == "":
         raise bad_request("\u7269\u54c1\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a")
@@ -492,7 +502,7 @@ def create_item(db: Session, payload: ItemCreate, actor_id: int | None = None) -
     )
     item_id = item.id
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def update_item(
@@ -500,6 +510,7 @@ def update_item(
     item_id: int,
     payload: ItemUpdate,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     fields = payload.model_fields_set
@@ -558,7 +569,7 @@ def update_item(
     item.updated_by_id = actor_id
 
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 async def add_item_image(
@@ -567,6 +578,7 @@ async def add_item_image(
     upload: UploadFile,
     is_primary: bool = False,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemImageResponse:
     item = require_item(db, item_id)
     content_type = upload.content_type or ""
@@ -613,7 +625,12 @@ async def add_item_image(
             delete_stored_upload(file_path)
         raise bad_request("\u56fe\u7247\u4fdd\u5b58\u5931\u8d25") from exc
     db.refresh(image)
-    return ItemImageResponse.model_validate({**image.__dict__, "url": protected_image_url(item.id, image.id)})
+    return ItemImageResponse.model_validate(
+        {
+            **image.__dict__,
+            "url": protected_image_url(item.id, image.id) if can_include_item_sensitive_data(item, include_sensitive) else None,
+        }
+    )
 
 
 async def add_item_attachment(
@@ -621,6 +638,7 @@ async def add_item_attachment(
     item_id: int,
     upload: UploadFile,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemAttachmentResponse:
     item = require_item(db, item_id)
     content_type = upload.content_type or ""
@@ -653,7 +671,14 @@ async def add_item_attachment(
         raise bad_request("\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25") from exc
     db.refresh(attachment)
     return ItemAttachmentResponse.model_validate(
-        {**attachment.__dict__, "download_url": protected_attachment_download_url(item.id, attachment.id)}
+        {
+            **attachment.__dict__,
+            "download_url": (
+                protected_attachment_download_url(item.id, attachment.id)
+                if can_include_item_sensitive_data(item, include_sensitive)
+                else None
+            ),
+        }
     )
 
 
@@ -662,6 +687,7 @@ def archive_item_image(
     item_id: int,
     image_id: int,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     image = db.get(ItemImage, image_id)
@@ -678,7 +704,7 @@ def archive_item_image(
             set_primary_image(db, item.id, replacement.id)
     commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
     db.expire_all()
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def archive_item_attachment(
@@ -686,6 +712,7 @@ def archive_item_attachment(
     item_id: int,
     attachment_id: int,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     attachment = db.get(ItemAttachment, attachment_id)
@@ -695,7 +722,7 @@ def archive_item_attachment(
     item.updated_by_id = actor_id
     commit_or_bad_request(db, "\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25")
     db.expire_all()
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def update_item_image_metadata(
@@ -704,6 +731,7 @@ def update_item_image_metadata(
     image_id: int,
     payload: ItemImageUpdate,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemImageResponse:
     item = require_item(db, item_id)
     image = db.get(ItemImage, image_id)
@@ -717,7 +745,12 @@ def update_item_image_metadata(
     item.updated_by_id = actor_id
     commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
     db.refresh(image)
-    return ItemImageResponse.model_validate({**image.__dict__, "url": protected_image_url(item.id, image.id)})
+    return ItemImageResponse.model_validate(
+        {
+            **image.__dict__,
+            "url": protected_image_url(item.id, image.id) if can_include_item_sensitive_data(item, include_sensitive) else None,
+        }
+    )
 
 
 def archive_item(
@@ -725,6 +758,7 @@ def archive_item(
     item_id: int,
     payload: ArchiveItemRequest | None = None,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     archive_payload = payload or ArchiveItemRequest()
@@ -733,7 +767,7 @@ def archive_item(
     item.archived_at = utcnow()
     item.updated_by_id = actor_id
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def move_item(
@@ -741,6 +775,7 @@ def move_item(
     item_id: int,
     payload: MoveItemRequest,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     if payload.location_node_id is None and payload.container_item_id is None:
@@ -777,7 +812,7 @@ def move_item(
         actor_id=actor_id,
     )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def change_item_status(
@@ -785,6 +820,7 @@ def change_item_status(
     item_id: int,
     payload: ChangeStatusRequest,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     target_status = require_active_status(db, payload.status_id)
@@ -820,7 +856,7 @@ def change_item_status(
         actor_id=actor_id,
     )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def adjust_quantity(
@@ -828,6 +864,7 @@ def adjust_quantity(
     item_id: int,
     payload: QuantityAdjustmentCreate,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     reason = payload.reason.strip()
@@ -856,7 +893,7 @@ def adjust_quantity(
         )
     )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def list_quantity_changes(db: Session, item_id: int) -> list[ItemQuantityChangeResponse]:
@@ -878,6 +915,7 @@ def create_loan(
     item_id: int,
     payload: LoanCreate,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     item_status = require_active_status(db, item.status_id)
@@ -919,7 +957,7 @@ def create_loan(
         actor_id=actor_id,
     )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def return_loan(
@@ -928,6 +966,7 @@ def return_loan(
     loan_id: int,
     payload: LoanReturn,
     actor_id: int | None = None,
+    include_sensitive: bool = True,
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     loan = db.get(ItemLoan, loan_id)
@@ -981,7 +1020,7 @@ def return_loan(
         actor_id=actor_id,
     )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
-    return get_item_detail(db, item_id)
+    return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
 def resolve_effective_location(item: Item) -> tuple[LocationNode | None, object | None]:
@@ -1013,7 +1052,7 @@ def matches_effective_location(item: Item, query: ItemListQuery) -> bool:
     return True
 
 
-def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
+def list_items(db: Session, query: ItemListQuery, include_sensitive: bool = True) -> ItemListResponse:
     stmt = select(Item)
     if not query.include_archived:
         stmt = stmt.where(Item.is_archived.is_(False))
@@ -1116,7 +1155,7 @@ def list_items(db: Session, query: ItemListQuery) -> ItemListResponse:
         )
         items = db.scalars(stmt).unique().all()
     return ItemListResponse(
-        items=[build_item_summary_response(item) for item in items],
+        items=[build_item_summary_response(item, include_sensitive=include_sensitive) for item in items],
         total=total,
         page=query.page,
         page_size=query.page_size,
@@ -1149,11 +1188,11 @@ def create_tag(db: Session, payload: TagCreate) -> TagResponse:
     return TagResponse.model_validate(tag)
 
 
-def get_item_detail(db: Session, item_id: int) -> ItemDetailResponse:
+def get_item_detail(db: Session, item_id: int, include_sensitive: bool = True) -> ItemDetailResponse:
     item = load_item_for_response(db, item_id)
     if item is None:
         raise not_found("\u7269\u54c1\u4e0d\u5b58\u5728")
-    return build_item_detail_response(item)
+    return build_item_detail_response(item, include_sensitive=include_sensitive)
 
 
 def stored_media_file(relative_path: str) -> Path:
@@ -1166,10 +1205,16 @@ def stored_media_file(relative_path: str) -> Path:
     return path
 
 
-def get_item_image_file(db: Session, item_id: int, image_id: int) -> MediaFile:
+def get_item_image_file(db: Session, item_id: int, image_id: int, include_sensitive: bool = True) -> MediaFile:
     item = require_item(db, item_id)
     image = db.get(ItemImage, image_id)
-    if item.is_archived or image is None or image.item_id != item.id or image.is_archived:
+    if (
+        item.is_archived
+        or image is None
+        or image.item_id != item.id
+        or image.is_archived
+        or not can_include_item_sensitive_data(item, include_sensitive)
+    ):
         raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
     return MediaFile(
         path=stored_media_file(image.file_path),
@@ -1178,10 +1223,21 @@ def get_item_image_file(db: Session, item_id: int, image_id: int) -> MediaFile:
     )
 
 
-def get_item_attachment_file(db: Session, item_id: int, attachment_id: int) -> MediaFile:
+def get_item_attachment_file(
+    db: Session,
+    item_id: int,
+    attachment_id: int,
+    include_sensitive: bool = True,
+) -> MediaFile:
     item = require_item(db, item_id)
     attachment = db.get(ItemAttachment, attachment_id)
-    if item.is_archived or attachment is None or attachment.item_id != item.id or attachment.is_archived:
+    if (
+        item.is_archived
+        or attachment is None
+        or attachment.item_id != item.id
+        or attachment.is_archived
+        or not can_include_item_sensitive_data(item, include_sensitive)
+    ):
         raise not_found("\u9644\u4ef6\u4e0d\u5b58\u5728")
     return MediaFile(
         path=stored_media_file(attachment.file_path),
@@ -1314,13 +1370,22 @@ def apply_list_sort(stmt, sort: str):
     return stmt.order_by(Item.updated_at.desc(), Item.id.desc())
 
 
-def build_item_summary_response(item: Item) -> ItemSummaryResponse:
+def can_include_item_sensitive_data(item: Item, include_sensitive: bool) -> bool:
+    return include_sensitive or not is_sensitive_privacy_level(item.privacy_level)
+
+
+def redacted_if_sensitive(value: str, *, redact: bool) -> str:
+    return REDACTED_VALUE if redact and value else value
+
+
+def build_item_summary_response(item: Item, include_sensitive: bool = True) -> ItemSummaryResponse:
     location_node, residence = resolve_effective_location(item)
-    primary_image = first_active_primary_image(item)
+    show_sensitive_data = can_include_item_sensitive_data(item, include_sensitive)
+    primary_image = first_active_primary_image(item) if show_sensitive_data else None
     return ItemSummaryResponse(
         id=item.id,
         name=item.name,
-        description=item.description,
+        description=redacted_if_sensitive(item.description, redact=not show_sensitive_data),
         category_id=item.category_id,
         category_name=item.category.name if item.category is not None else "",
         status_id=item.status_id,
@@ -1339,7 +1404,7 @@ def build_item_summary_response(item: Item) -> ItemSummaryResponse:
         container_item_id=item.container_item_id,
         container_item_name=item.container_item.name if item.container_item is not None else None,
         is_container=item.is_container,
-        privacy_level=item.privacy_level,
+        privacy_level=normalize_privacy_level(item.privacy_level),
         is_archived=item.is_archived,
         primary_image_url=(
             protected_image_url(item.id, primary_image.id)
@@ -1352,17 +1417,18 @@ def build_item_summary_response(item: Item) -> ItemSummaryResponse:
     )
 
 
-def build_item_detail_response(item: Item) -> ItemDetailResponse:
-    summary = build_item_summary_response(item)
+def build_item_detail_response(item: Item, include_sensitive: bool = True) -> ItemDetailResponse:
+    show_sensitive_data = can_include_item_sensitive_data(item, include_sensitive)
+    summary = build_item_summary_response(item, include_sensitive=include_sensitive)
     return ItemDetailResponse(
         **summary.model_dump(),
-        archive_reason=item.archive_reason,
+        archive_reason=redacted_if_sensitive(item.archive_reason, redact=not show_sensitive_data),
         archived_at=item.archived_at,
         created_by_id=item.created_by_id,
         updated_by_id=item.updated_by_id,
-        attribute_values=build_attribute_value_responses(item),
-        images=build_image_responses(item),
-        attachments=build_attachment_responses(item),
+        attribute_values=build_attribute_value_responses(item, include_sensitive=include_sensitive),
+        images=build_image_responses(item) if show_sensitive_data else [],
+        attachments=build_attachment_responses(item) if show_sensitive_data else [],
         movements=build_movement_responses(item),
         quantity_changes=build_quantity_change_responses(item),
         loans=build_loan_responses(item),
@@ -1380,7 +1446,8 @@ def build_tag_responses(item: Item) -> list[TagResponse]:
     ]
 
 
-def build_attribute_value_responses(item: Item) -> list[ItemAttributeValueResponse]:
+def build_attribute_value_responses(item: Item, include_sensitive: bool = True) -> list[ItemAttributeValueResponse]:
+    redact_item_values = not can_include_item_sensitive_data(item, include_sensitive)
     return [
         ItemAttributeValueResponse(
             id=value.id,
@@ -1388,7 +1455,16 @@ def build_attribute_value_responses(item: Item) -> list[ItemAttributeValueRespon
             attribute_key=value.attribute_definition.key if value.attribute_definition is not None else "",
             attribute_name=value.attribute_definition.name if value.attribute_definition is not None else "",
             field_type=value.attribute_definition.field_type if value.attribute_definition is not None else "",
-            value=value.value,
+            value=(
+                REDACTED_VALUE
+                if redact_item_values
+                or (
+                    value.attribute_definition is not None
+                    and is_sensitive_privacy_level(value.attribute_definition.privacy_level)
+                    and not include_sensitive
+                )
+                else value.value
+            ),
         )
         for value in sorted(
             item.attribute_values,

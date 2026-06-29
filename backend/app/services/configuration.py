@@ -51,6 +51,7 @@ from app.schemas.configuration import (
     ResidenceUpdate,
 )
 from app.services.audit import record_audit_log
+from app.services.privacy import normalize_privacy_level
 
 HOME_SPACE_NAME = "我们家"
 
@@ -236,6 +237,26 @@ def build_location_tree(nodes: list[LocationNode]) -> list[LocationNodeResponse]
     return [build(node) for node in children_by_parent.get(None, [])]
 
 
+def build_attribute_definition_response(definition: AttributeDefinition) -> AttributeDefinitionResponse:
+    return AttributeDefinitionResponse(
+        id=definition.id,
+        category_id=definition.category_id,
+        key=definition.key,
+        name=definition.name,
+        field_type=definition.field_type,
+        default_value=definition.default_value,
+        privacy_level=normalize_privacy_level(definition.privacy_level),
+        is_required=definition.is_required,
+        is_filterable=definition.is_filterable,
+        sort_order=definition.sort_order,
+        is_active=definition.is_active,
+        options=[
+            AttributeOptionResponse.model_validate(option)
+            for option in sorted(definition.options, key=lambda item: (item.sort_order, item.id))
+        ],
+    )
+
+
 def build_category_tree(categories: list[Category]) -> list[CategoryResponse]:
     children_by_parent: dict[int | None, list[Category]] = {}
     category_ids = {category.id for category in categories}
@@ -253,7 +274,7 @@ def build_category_tree(categories: list[Category]) -> list[CategoryResponse]:
             sort_order=category.sort_order,
             is_active=category.is_active,
             attribute_definitions=[
-                AttributeDefinitionResponse.model_validate(definition)
+                build_attribute_definition_response(definition)
                 for definition in sorted(
                     category.attribute_definitions,
                     key=lambda item: (item.sort_order, item.id),
@@ -560,7 +581,7 @@ def create_attribute_definition(
     )
     commit_or_bad_request(db, "字段标识已存在")
     db.refresh(definition)
-    return AttributeDefinitionResponse.model_validate(definition)
+    return build_attribute_definition_response(definition)
 
 
 def update_home_space(db: Session, payload: HomeSpaceUpdate) -> HomeSpaceResponse:
@@ -681,7 +702,7 @@ def update_attribute_definition(
     definition.is_active = payload.is_active
     db.commit()
     db.refresh(definition)
-    return AttributeDefinitionResponse.model_validate(definition)
+    return build_attribute_definition_response(definition)
 
 
 def create_attribute_option(

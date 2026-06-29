@@ -74,7 +74,7 @@ function multiSelectValue(definitionId: number): string[] {
       :required="definition.is_required"
     >
       <el-input
-        v-if="['text', 'encrypted_text', 'url'].includes(definition.field_type)"
+        v-if="['text', 'url'].includes(definition.field_type)"
         :model-value="valueOf(definition.id)"
         :maxlength="definition.field_type === 'url' ? 500 : 240"
         clearable

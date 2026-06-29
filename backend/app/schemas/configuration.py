@@ -1,6 +1,25 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+PrivacyLevel = Literal["normal", "sensitive"]
+AttributeFieldType = Literal[
+    "text",
+    "long_text",
+    "number",
+    "money",
+    "date",
+    "datetime",
+    "single_select",
+    "multi_select",
+    "boolean",
+    "url",
+    "attachment",
+    "reminder_date",
+]
 
 
 class ResponseModel(BaseModel):
@@ -115,9 +134,9 @@ class AttributeDefinitionCreate(BaseModel):
     category_id: int
     key: str = Field(min_length=1, max_length=80)
     name: str = Field(min_length=1, max_length=120)
-    field_type: str = Field(min_length=1, max_length=40)
+    field_type: AttributeFieldType
     default_value: str = ""
-    privacy_level: str = "normal"
+    privacy_level: PrivacyLevel = "normal"
     is_required: bool = False
     is_filterable: bool = False
     sort_order: int = 0
@@ -125,9 +144,9 @@ class AttributeDefinitionCreate(BaseModel):
 
 class AttributeDefinitionUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    field_type: str = Field(min_length=1, max_length=40)
+    field_type: AttributeFieldType
     default_value: str = ""
-    privacy_level: str = "normal"
+    privacy_level: PrivacyLevel = "normal"
     is_required: bool = False
     is_filterable: bool = False
     sort_order: int = 0

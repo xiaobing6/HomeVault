@@ -14,7 +14,8 @@ import type {
 import type {
   ItemCreateRequest,
   ItemDetail,
-  ItemUpdateRequest
+  ItemUpdateRequest,
+  PrivacyLevel
 } from '../../api/inventory'
 import { useConfigurationStore } from '../../stores/configuration'
 import { useInventoryStore } from '../../stores/inventory'
@@ -38,7 +39,7 @@ interface ItemFormModel {
   location_node_id: number | null
   container_item_id: number | null
   is_container: boolean
-  privacy_level: string
+  privacy_level: PrivacyLevel
   tagsText: string
 }
 
@@ -72,8 +73,7 @@ const form = reactive<ItemFormModel>(createEmptyForm())
 const steps = ['分类', '基本信息', '位置或容器', '自定义字段', '图片和附件']
 const privacyOptions = [
   { label: '普通', value: 'normal' },
-  { label: '私密', value: 'private' },
-  { label: '加密', value: 'encrypted' }
+  { label: '敏感', value: 'sensitive' }
 ]
 
 const persistedItem = computed(() => workingItem.value ?? props.item ?? null)

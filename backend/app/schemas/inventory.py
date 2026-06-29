@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+PrivacyLevel = Literal["normal", "sensitive"]
 
 
 class ResponseModel(BaseModel):
@@ -40,7 +44,7 @@ class ItemCreate(PlacementPayload):
     owner_member_id: int | None = None
     keeper_member_id: int | None = None
     is_container: bool = False
-    privacy_level: str = "normal"
+    privacy_level: PrivacyLevel = "normal"
     attribute_values: list[ItemAttributeValueInput] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
@@ -53,7 +57,7 @@ class ItemUpdate(RequestModel):
     owner_member_id: int | None = None
     keeper_member_id: int | None = None
     is_container: bool | None = None
-    privacy_level: str | None = None
+    privacy_level: PrivacyLevel | None = None
     attribute_values: list[ItemAttributeValueInput] | None = None
     tags: list[str] | None = None
 
@@ -118,7 +122,7 @@ class ItemSummaryResponse(ResponseModel):
     container_item_id: int | None = None
     container_item_name: str | None = None
     is_container: bool
-    privacy_level: str
+    privacy_level: PrivacyLevel
     is_archived: bool
     primary_image_url: str | None = None
     tags: list[TagResponse] = Field(default_factory=list)

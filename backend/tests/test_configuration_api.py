@@ -10,7 +10,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import AuditLog
 from app.models.auth import Role, User
-from app.models.configuration import AttributeOption
+from app.models.configuration import AttributeDefinition, AttributeOption
 from app.services.seed import seed_auth_baseline
 
 
@@ -215,6 +215,66 @@ def test_created_attribute_definition_is_returned_in_category_read_payloads(clie
                 "options": [],
             }
         ]
+
+
+def test_attribute_definition_rejects_removed_encrypted_text_field_type(client: TestClient) -> None:
+    headers = login(client)
+    category = client.post(
+        "/api/config/categories",
+        headers=headers,
+        json={"code": "documents", "name": "Documents"},
+    )
+    assert category.status_code == 201
+
+    response = client.post(
+        "/api/config/attribute-definitions",
+        headers=headers,
+        json={
+            "category_id": category.json()["id"],
+            "key": "safe_code",
+            "name": "Safe code",
+            "field_type": "encrypted_text",
+            "privacy_level": "sensitive",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_legacy_attribute_privacy_level_is_normalized_in_config_payloads(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    category = client.post(
+        "/api/config/categories",
+        headers=headers,
+        json={"code": "documents", "name": "Documents"},
+    )
+    assert category.status_code == 201
+    field = client.post(
+        "/api/config/attribute-definitions",
+        headers=headers,
+        json={
+            "category_id": category.json()["id"],
+            "key": "serial_number",
+            "name": "Serial number",
+            "field_type": "text",
+        },
+    )
+    assert field.status_code == 201
+    definition = db_session.get(AttributeDefinition, field.json()["id"])
+    assert definition is not None
+    definition.privacy_level = "encrypted"
+    db_session.commit()
+
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    categories = client.get("/api/config/categories", headers=headers)
+
+    assert bootstrap.status_code == 200
+    assert categories.status_code == 200
+    assert bootstrap.json()["categories"][0]["attribute_definitions"][0]["privacy_level"] == "sensitive"
+    assert categories.json()[0]["attribute_definitions"][0]["privacy_level"] == "sensitive"
 
 
 def test_attribute_options_are_returned_with_category_attribute_definitions(

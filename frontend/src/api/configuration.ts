@@ -1,5 +1,20 @@
 import { apiClient } from './client'
 
+export type PrivacyLevel = 'normal' | 'sensitive'
+export type AttributeFieldType =
+  | 'text'
+  | 'long_text'
+  | 'number'
+  | 'money'
+  | 'date'
+  | 'datetime'
+  | 'single_select'
+  | 'multi_select'
+  | 'boolean'
+  | 'url'
+  | 'attachment'
+  | 'reminder_date'
+
 export interface HomeSpace {
   id: number
   name: string
@@ -65,9 +80,9 @@ export interface AttributeDefinition {
   category_id: number
   key: string
   name: string
-  field_type: string
+  field_type: AttributeFieldType
   default_value: string
-  privacy_level: string
+  privacy_level: PrivacyLevel
   is_required: boolean
   is_filterable: boolean
   sort_order: number
@@ -183,9 +198,9 @@ export interface AttributeDefinitionCreate {
   category_id: number
   key: string
   name: string
-  field_type: string
+  field_type: AttributeFieldType
   default_value?: string
-  privacy_level?: string
+  privacy_level?: PrivacyLevel
   is_required?: boolean
   is_filterable?: boolean
   sort_order?: number
@@ -193,9 +208,9 @@ export interface AttributeDefinitionCreate {
 
 export interface AttributeDefinitionUpdate {
   name: string
-  field_type: string
+  field_type: AttributeFieldType
   default_value: string
-  privacy_level: string
+  privacy_level: PrivacyLevel
   is_required: boolean
   is_filterable: boolean
   sort_order: number
