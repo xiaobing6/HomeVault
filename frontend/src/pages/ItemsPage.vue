@@ -12,6 +12,7 @@ import ItemCardGrid from '../components/items/ItemCardGrid.vue'
 import ItemDetailModal from '../components/items/ItemDetailModal.vue'
 import ItemFilterPanel from '../components/items/ItemFilterPanel.vue'
 import ItemFormDrawer from '../components/items/ItemFormDrawer.vue'
+import ItemImportDialog from '../components/items/ItemImportDialog.vue'
 import ItemTable from '../components/items/ItemTable.vue'
 import ItemToolbar from '../components/items/ItemToolbar.vue'
 import { useAuthStore } from '../stores/auth'
@@ -40,6 +41,8 @@ const selectedItems = ref<ItemSummary[]>([])
 const bulkActionOpen = ref(false)
 const currentBulkAction = ref<BulkActionType | null>(null)
 const exporting = ref(false)
+const importDialogOpen = ref(false)
+const importTemplateDownloading = ref(false)
 const selectedItemIds = computed(() => selectedItems.value.map((item) => item.id))
 const selectedCount = computed(() => selectedItems.value.length)
 const searchValue = computed({
@@ -198,6 +201,17 @@ function downloadCsvBlob(blob: Blob, scope: 'filtered' | 'selected') {
   URL.revokeObjectURL(url)
 }
 
+function downloadImportTemplateBlob(blob: Blob) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `homevault-import-template-${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 async function exportFilteredItems() {
   exporting.value = true
   try {
@@ -226,6 +240,25 @@ async function exportSelectedItems() {
   } finally {
     exporting.value = false
   }
+}
+
+async function downloadImportTemplate() {
+  if (importTemplateDownloading.value) return
+
+  importTemplateDownloading.value = true
+  try {
+    const blob = await inventory.downloadImportTemplate()
+    downloadImportTemplateBlob(blob)
+    ElMessage.success('已下载导入模板')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    importTemplateDownloading.value = false
+  }
+}
+
+function handleImportDone() {
+  selectedItems.value = []
 }
 
 function closeDetail() {
@@ -258,6 +291,7 @@ function closeDetail() {
           @bulk-archive="openBulkAction('archive')"
           @export-filtered="exportFilteredItems"
           @export-selected="exportSelectedItems"
+          @import-items="importDialogOpen = true"
         />
 
         <ItemCardGrid
@@ -324,6 +358,12 @@ function closeDetail() {
       :selected-item-ids="selectedItemIds"
       :selected-count="selectedCount"
       @success="handleBulkSuccess"
+    />
+
+    <ItemImportDialog
+      v-model="importDialogOpen"
+      @download-template="downloadImportTemplate"
+      @imported="handleImportDone"
     />
   </section>
 </template>

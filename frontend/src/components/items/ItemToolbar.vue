@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
-import { Download, Grid, List, Operation, Plus, Search } from '@element-plus/icons-vue'
+import { Download, Grid, List, Operation, Plus, Search, Upload } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   search?: string | null
@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'bulk-archive': []
   'export-selected': []
   'export-filtered': []
+  'import-items': []
 }>()
 
 const localSearch = ref(props.search ?? '')
@@ -132,6 +133,10 @@ function submitSearchNow() {
           </el-dropdown-menu>
         </template>
       </el-dropdown>
+
+      <el-button v-if="canCreate" :icon="Upload" @click="emit('import-items')">
+        导入
+      </el-button>
 
       <el-button v-if="canCreate" type="primary" :icon="Plus" @click="emit('add-item')">
         新增

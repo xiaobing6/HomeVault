@@ -271,6 +271,37 @@ export interface ItemExportRequest {
   filters?: ItemFilters
 }
 
+export interface ImportFieldMessage {
+  field: string
+  message: string
+}
+
+export interface ImportRowPreview {
+  row_number: number
+  original: Record<string, string>
+  normalized: Record<string, unknown> | null
+  errors: ImportFieldMessage[]
+  warnings: ImportFieldMessage[]
+  is_valid: boolean
+}
+
+export interface ImportPreviewResponse {
+  token: string | null
+  rows: ImportRowPreview[]
+  total_count: number
+  valid_count: number
+  invalid_count: number
+}
+
+export interface ImportConfirmRequest {
+  token: string
+}
+
+export interface ImportConfirmResponse {
+  imported_count: number
+  item_ids: number[]
+}
+
 export interface ItemImageUpdateRequest {
   is_primary?: boolean | null
   sort_order?: number | null
@@ -346,6 +377,27 @@ export async function exportItemsCsvApi(payload: ItemExportRequest = {}): Promis
   const response = await apiClient.post<Blob>('/items/export.csv', payload, {
     responseType: 'blob'
   })
+  return response.data
+}
+
+export async function downloadImportTemplateApi(): Promise<Blob> {
+  const response = await apiClient.get<Blob>('/items/import/template.csv', {
+    responseType: 'blob'
+  })
+  return response.data
+}
+
+export async function previewInventoryImportApi(file: File): Promise<ImportPreviewResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await apiClient.post<ImportPreviewResponse>('/items/import/preview', formData)
+  return response.data
+}
+
+export async function confirmInventoryImportApi(
+  payload: ImportConfirmRequest
+): Promise<ImportConfirmResponse> {
+  const response = await apiClient.post<ImportConfirmResponse>('/items/import/confirm', payload)
   return response.data
 }
 

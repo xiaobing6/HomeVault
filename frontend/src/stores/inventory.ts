@@ -8,13 +8,16 @@ import {
   bulkChangeItemStatusApi,
   bulkMoveItemsApi,
   changeItemStatusApi,
+  confirmInventoryImportApi,
   createItemApi,
   deleteAttachmentApi,
   deleteImageApi,
+  downloadImportTemplateApi,
   exportItemsCsvApi,
   fetchItemDetailApi,
   listItemsApi,
   moveItemApi,
+  previewInventoryImportApi,
   returnLoanApi,
   updateImageApi,
   updateItemApi,
@@ -25,6 +28,7 @@ import {
   type BulkChangeStatusRequest,
   type BulkMoveItemsRequest,
   type ChangeStatusRequest,
+  type ImportConfirmRequest,
   type ItemCreateRequest,
   type ItemDetail,
   type ItemExportRequest,
@@ -182,6 +186,17 @@ export const useInventoryStore = defineStore('inventory', {
     },
     async exportItemsCsv(payload: ItemExportRequest = {}) {
       return await exportItemsCsvApi(payload)
+    },
+    async downloadImportTemplate() {
+      return await downloadImportTemplateApi()
+    },
+    async previewInventoryImport(file: File) {
+      return await previewInventoryImportApi(file)
+    },
+    async confirmInventoryImport(payload: ImportConfirmRequest) {
+      const response = await confirmInventoryImportApi(payload)
+      await this.loadItems()
+      return response
     },
     async adjustQuantity(itemId: number, payload: QuantityAdjustmentRequest) {
       return await this.saveAndRefresh(() => adjustQuantityApi(itemId, payload))
