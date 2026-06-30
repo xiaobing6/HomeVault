@@ -120,6 +120,10 @@ def csv_upload(content: str) -> dict[str, tuple[str, bytes, str]]:
     return {"file": ("items.csv", content.encode("utf-8"), "text/csv")}
 
 
+def csv_upload_bytes(content: bytes) -> dict[str, tuple[str, bytes, str]]:
+    return {"file": ("items.csv", content, "text/csv")}
+
+
 def test_admin_can_create_list_detail_update_and_archive_item(client: TestClient, db_session: Session) -> None:
     headers = login(client)
     ids = inventory_ids(db_session)
@@ -478,6 +482,50 @@ def test_inventory_import_preview_reports_row_errors(client: TestClient) -> None
     assert body["rows"][1]["errors"][0]["field"] == "category"
 
 
+def test_inventory_import_preview_rejects_non_utf8_csv(client: TestClient) -> None:
+    headers = login(client)
+
+    response = client.post(
+        "/api/items/import/preview",
+        headers=headers,
+        files=csv_upload_bytes(b"\xff\xfe\x00\x00"),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"]
+
+
+def test_inventory_import_preview_rejects_oversized_field(client: TestClient) -> None:
+    headers = login(client)
+    oversized_name = "A" * (1024 * 1024 + 1)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            f"{oversized_name},From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 400
+    assert response.json()["message"]
+
+
+def test_inventory_import_preview_rejects_malformed_csv(client: TestClient) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            '"Broken row,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,',
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 400
+    assert response.json()["message"]
+
+
 def test_inventory_import_confirm_creates_previewed_items(client: TestClient, db_session: Session) -> None:
     headers = login(client)
     content = "\n".join(
@@ -500,6 +548,48 @@ def test_inventory_import_confirm_creates_previewed_items(client: TestClient, db
     assert imported_items[1].quantity == 3
     assert imported_items[1].is_container is True
     assert imported_items[1].tag_links[0].tag.normalized_name == "paper"
+
+
+def test_inventory_import_confirm_rejects_token_from_another_user(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    admin_headers = login(client)
+    editor_headers = login(client, "editor", "Editor123!")
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Cross user import,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+    preview = client.post("/api/items/import/preview", headers=admin_headers, files=csv_upload(content))
+    token = preview.json()["token"]
+
+    response = client.post("/api/items/import/confirm", headers=editor_headers, json={"token": token})
+    imported = db_session.scalar(select(Item.id).where(Item.name == "Cross user import").limit(1))
+
+    assert response.status_code == 400
+    assert response.json()["message"]
+    assert imported is None
+
+
+def test_inventory_import_confirm_rejects_reused_token(client: TestClient) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Single use import,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+    preview = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+    token = preview.json()["token"]
+    first = client.post("/api/items/import/confirm", headers=headers, json={"token": token})
+
+    second = client.post("/api/items/import/confirm", headers=headers, json={"token": token})
+
+    assert first.status_code == 200
+    assert second.status_code == 400
+    assert second.json()["message"]
 
 
 def test_inventory_import_confirm_rejects_invalid_token(client: TestClient) -> None:

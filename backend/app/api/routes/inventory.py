@@ -63,6 +63,7 @@ from app.services.inventory_import import (
     confirm_inventory_import,
     import_template_csv,
     preview_inventory_import,
+    read_import_upload,
 )
 
 READ_PERMISSION = "items:view"
@@ -159,7 +160,7 @@ async def preview_inventory_items_import(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(CREATE_PERMISSION)),
 ) -> ImportPreviewResponse:
-    return preview_inventory_import(db, await file.read())
+    return preview_inventory_import(db, await read_import_upload(file), user_id=user.id)
 
 
 @router.post("/items/import/confirm", response_model=ImportConfirmResponse)
@@ -168,7 +169,7 @@ def confirm_inventory_items_import(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission(CREATE_PERMISSION)),
 ) -> ImportConfirmResponse:
-    return confirm_inventory_import(db, payload.token, actor_id=user.id)
+    return confirm_inventory_import(db, payload.token, actor_id=user.id, user_id=user.id)
 
 
 @router.get("/items/{item_id}", response_model=ItemDetailResponse)

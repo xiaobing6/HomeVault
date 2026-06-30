@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from io import StringIO
 from secrets import token_urlsafe
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -48,11 +48,17 @@ STATIC_IMPORT_COLUMNS = [
     "tags",
 ]
 MAX_IMPORT_ROWS = 500
+MAX_IMPORT_BYTES = 1024 * 1024
+MAX_IMPORT_FIELD_CHARS = 64 * 1024
+IMPORT_READ_CHUNK_BYTES = 64 * 1024
 IMPORT_TOKEN_TTL = timedelta(minutes=30)
+MAX_IMPORT_CACHE_ENTRIES = 100
 
 
 @dataclass(frozen=True)
 class CachedImport:
+    user_id: int
+    created_at: datetime
     expires_at: datetime
     payloads: list[ItemCreate]
 
@@ -75,38 +81,67 @@ def import_template_csv(db: Session) -> str:
     return output.getvalue()
 
 
-def read_import_csv(content: bytes) -> list[tuple[int, dict[str, str]]]:
-    text = content.decode("utf-8-sig")
-    reader = csv.DictReader(StringIO(text))
-    if not reader.fieldnames:
-        raise bad_request("CSV 文件不能为空")
+async def read_import_upload(file: UploadFile) -> bytes:
+    chunks: list[bytes] = []
+    total_size = 0
+    while chunk := await file.read(IMPORT_READ_CHUNK_BYTES):
+        total_size += len(chunk)
+        if total_size > MAX_IMPORT_BYTES:
+            raise bad_request("CSV 文件过大")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
-    rows: list[tuple[int, dict[str, str]]] = []
-    for row_number, row in enumerate(reader, start=2):
-        normalized = {
-            str(key).strip(): str(value or "").strip()
-            for key, value in row.items()
-            if key is not None
-        }
-        if not any(value for value in normalized.values()):
-            continue
-        rows.append((row_number, normalized))
-        if len(rows) > MAX_IMPORT_ROWS:
-            raise bad_request(f"一次最多导入 {MAX_IMPORT_ROWS} 行")
+
+def normalize_csv_row(row: dict[str | None, str | None]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for key, value in row.items():
+        if key is None:
+            raise bad_request("CSV 格式不正确")
+        cell_value = str(value or "").strip()
+        if len(str(key)) > MAX_IMPORT_FIELD_CHARS or len(cell_value) > MAX_IMPORT_FIELD_CHARS:
+            raise bad_request("CSV 字段过长")
+        normalized[str(key).strip()] = cell_value
+    return normalized
+
+
+def read_import_csv(content: bytes) -> list[tuple[int, dict[str, str]]]:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise bad_request("CSV 文件必须使用 UTF-8 编码") from exc
+
+    previous_field_limit = csv.field_size_limit(MAX_IMPORT_FIELD_CHARS)
+    try:
+        reader = csv.DictReader(StringIO(text), strict=True)
+        if not reader.fieldnames:
+            raise bad_request("CSV 文件不能为空")
+
+        rows: list[tuple[int, dict[str, str]]] = []
+        for row_number, row in enumerate(reader, start=2):
+            normalized = normalize_csv_row(row)
+            if not any(value for value in normalized.values()):
+                continue
+            rows.append((row_number, normalized))
+            if len(rows) > MAX_IMPORT_ROWS:
+                raise bad_request(f"一次最多导入 {MAX_IMPORT_ROWS} 行")
+    except csv.Error as exc:
+        raise bad_request("CSV 格式不正确") from exc
+    finally:
+        csv.field_size_limit(previous_field_limit)
 
     if not rows:
         raise bad_request("CSV 文件不能为空")
     return rows
 
 
-def preview_inventory_import(db: Session, content: bytes) -> ImportPreviewResponse:
+def preview_inventory_import(db: Session, content: bytes, user_id: int) -> ImportPreviewResponse:
     rows = [
         build_row_preview(db, row_number, original)
         for row_number, original in read_import_csv(content)
     ]
     invalid_count = sum(1 for row in rows if not row.is_valid)
     valid_payloads = [ItemCreate.model_validate(row.normalized) for row in rows if row.normalized is not None]
-    token = cache_import(valid_payloads) if invalid_count == 0 else None
+    token = cache_import(valid_payloads, user_id=user_id) if invalid_count == 0 else None
     return ImportPreviewResponse(
         token=token,
         rows=rows,
@@ -116,12 +151,20 @@ def preview_inventory_import(db: Session, content: bytes) -> ImportPreviewRespon
     )
 
 
-def confirm_inventory_import(db: Session, token: str, actor_id: int | None = None) -> ImportConfirmResponse:
+def confirm_inventory_import(
+    db: Session,
+    token: str,
+    actor_id: int | None = None,
+    user_id: int | None = None,
+) -> ImportConfirmResponse:
     cleanup_import_cache()
     cached = _IMPORT_CACHE.get(token)
     if cached is None or cached.expires_at <= utcnow():
         _IMPORT_CACHE.pop(token, None)
         raise bad_request("导入预览已失效，请重新上传 CSV")
+
+    if user_id is not None and cached.user_id != user_id:
+        raise bad_request("导入令牌无效")
 
     item_ids: list[int] = []
     try:
@@ -421,11 +464,27 @@ def location_path(location: LocationNode) -> str:
     return "/".join(reversed(names))
 
 
-def cache_import(payloads: list[ItemCreate]) -> str:
+def cache_import(payloads: list[ItemCreate], user_id: int) -> str:
     cleanup_import_cache()
+    evict_oldest_imports()
     token = token_urlsafe(24)
-    _IMPORT_CACHE[token] = CachedImport(expires_at=utcnow() + IMPORT_TOKEN_TTL, payloads=payloads)
+    now = utcnow()
+    _IMPORT_CACHE[token] = CachedImport(
+        user_id=user_id,
+        created_at=now,
+        expires_at=now + IMPORT_TOKEN_TTL,
+        payloads=payloads,
+    )
     return token
+
+
+def evict_oldest_imports() -> None:
+    while len(_IMPORT_CACHE) >= MAX_IMPORT_CACHE_ENTRIES:
+        oldest_token = min(
+            _IMPORT_CACHE,
+            key=lambda token: (_IMPORT_CACHE[token].created_at, token),
+        )
+        _IMPORT_CACHE.pop(oldest_token, None)
 
 
 def cleanup_import_cache() -> None:
