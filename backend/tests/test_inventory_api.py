@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import csv
+import time
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +21,7 @@ from app.main import app
 from app.models.auth import Role, User
 from app.models.configuration import AttributeDefinition, Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
 from app.models.inventory import Item
+from app.services import inventory_import
 from app.services.reminders import server_today
 from app.services.seed import seed_auth_baseline
 
@@ -590,6 +594,51 @@ def test_inventory_import_confirm_rejects_reused_token(client: TestClient) -> No
     assert first.status_code == 200
     assert second.status_code == 400
     assert second.json()["message"]
+
+
+def test_inventory_import_confirm_consumes_token_before_writing(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Concurrent import,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+    preview = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+    token = preview.json()["token"]
+    commits: list[str] = []
+
+    class FakeSession:
+        def commit(self) -> None:
+            time.sleep(0.05)
+            commits.append("commit")
+
+        def rollback(self) -> None:
+            pass
+
+    def fake_create_item_record(db: object, payload: object, actor_id: int | None = None) -> object:
+        time.sleep(0.05)
+        return SimpleNamespace(id=100 + len(commits))
+
+    monkeypatch.setattr(inventory_import, "create_item_record", fake_create_item_record)
+    monkeypatch.setattr(inventory_import, "flush_or_bad_request", lambda *args, **kwargs: None)
+
+    def confirm_once() -> int:
+        try:
+            inventory_import.confirm_inventory_import(FakeSession(), token, actor_id=1, user_id=1)
+        except Exception:
+            return 400
+        return 200
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        statuses = list(executor.map(lambda _index: confirm_once(), range(2)))
+
+    assert sorted(statuses) == [200, 400]
+    assert len(commits) == 1
 
 
 def test_inventory_import_confirm_rejects_invalid_token(client: TestClient) -> None:

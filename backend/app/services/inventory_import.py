@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -64,6 +65,7 @@ class CachedImport:
 
 
 _IMPORT_CACHE: dict[str, CachedImport] = {}
+_IMPORT_CACHE_LOCK = threading.Lock()
 
 
 def import_template_csv(db: Session) -> str:
@@ -157,10 +159,10 @@ def confirm_inventory_import(
     actor_id: int | None = None,
     user_id: int | None = None,
 ) -> ImportConfirmResponse:
-    cleanup_import_cache()
-    cached = _IMPORT_CACHE.get(token)
+    with _IMPORT_CACHE_LOCK:
+        cleanup_import_cache_locked()
+        cached = _IMPORT_CACHE.pop(token, None)
     if cached is None or cached.expires_at <= utcnow():
-        _IMPORT_CACHE.pop(token, None)
         raise bad_request("导入预览已失效，请重新上传 CSV")
 
     if user_id is not None and cached.user_id != user_id:
@@ -179,8 +181,6 @@ def confirm_inventory_import(
     except Exception:
         db.rollback()
         raise
-    finally:
-        _IMPORT_CACHE.pop(token, None)
 
     return ImportConfirmResponse(imported_count=len(item_ids), item_ids=item_ids)
 
@@ -465,20 +465,21 @@ def location_path(location: LocationNode) -> str:
 
 
 def cache_import(payloads: list[ItemCreate], user_id: int) -> str:
-    cleanup_import_cache()
-    evict_oldest_imports()
-    token = token_urlsafe(24)
-    now = utcnow()
-    _IMPORT_CACHE[token] = CachedImport(
-        user_id=user_id,
-        created_at=now,
-        expires_at=now + IMPORT_TOKEN_TTL,
-        payloads=payloads,
-    )
-    return token
+    with _IMPORT_CACHE_LOCK:
+        cleanup_import_cache_locked()
+        evict_oldest_imports_locked()
+        token = token_urlsafe(24)
+        now = utcnow()
+        _IMPORT_CACHE[token] = CachedImport(
+            user_id=user_id,
+            created_at=now,
+            expires_at=now + IMPORT_TOKEN_TTL,
+            payloads=payloads,
+        )
+        return token
 
 
-def evict_oldest_imports() -> None:
+def evict_oldest_imports_locked() -> None:
     while len(_IMPORT_CACHE) >= MAX_IMPORT_CACHE_ENTRIES:
         oldest_token = min(
             _IMPORT_CACHE,
@@ -488,6 +489,11 @@ def evict_oldest_imports() -> None:
 
 
 def cleanup_import_cache() -> None:
+    with _IMPORT_CACHE_LOCK:
+        cleanup_import_cache_locked()
+
+
+def cleanup_import_cache_locked() -> None:
     now = utcnow()
     expired_tokens = [token for token, cached in _IMPORT_CACHE.items() if cached.expires_at <= now]
     for token in expired_tokens:
