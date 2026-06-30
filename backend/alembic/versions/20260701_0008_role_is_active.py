@@ -20,7 +20,6 @@ def upgrade() -> None:
         "roles",
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
     )
-    op.alter_column("roles", "is_active", server_default=None)
 
 
 def downgrade() -> None:
