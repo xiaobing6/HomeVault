@@ -64,6 +64,7 @@ class AdminRoleResponse(BaseModel):
     name: str
     description: str
     is_system: bool
+    is_active: bool
     permissions: list[AdminPermissionResponse] = Field(default_factory=list)
 
 

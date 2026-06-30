@@ -69,6 +69,7 @@ class Role(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     users: Mapped[list[User]] = relationship(
         secondary=user_roles,

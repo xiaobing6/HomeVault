@@ -41,8 +41,18 @@ def seed_auth_baseline(db: Session, admin_username: str, admin_password: str) ->
     for code, name, description in ROLES:
         role = db.scalar(select(Role).where(Role.code == code))
         if role is None:
-            role = Role(code=code, name=name, description=description, is_system=True)
+            role = Role(
+                code=code,
+                name=name,
+                description=description,
+                is_system=True,
+                is_active=True,
+            )
             db.add(role)
+        role.name = name
+        role.description = description
+        role.is_system = True
+        role.is_active = True
         role.permissions = [permissions_by_code[item] for item in ROLE_PERMISSIONS[code]]
         roles_by_code[code] = role
 

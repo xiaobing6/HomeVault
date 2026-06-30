@@ -53,6 +53,7 @@ def serialize_admin_role(role: Role) -> AdminRoleResponse:
         name=role.name,
         description=role.description,
         is_system=role.is_system,
+        is_active=role.is_active,
         permissions=[
             AdminPermissionResponse.model_validate(permission)
             for permission in sorted(role.permissions, key=lambda item: item.code)

@@ -39,3 +39,13 @@ def test_seed_auth_baseline_returns_usable_admin_after_session_closes(db_session
 
     assert admin.id > 0
     assert admin.username == "admin"
+
+
+def test_seeded_system_roles_are_active(db_session: Session) -> None:
+    seed_auth_baseline(db_session, admin_username="admin", admin_password="ChangeMe123!")
+
+    roles = db_session.scalars(select(Role)).all()
+
+    assert {role.code for role in roles} == {"admin", "editor", "viewer"}
+    assert all(role.is_system for role in roles)
+    assert all(role.is_active for role in roles)
