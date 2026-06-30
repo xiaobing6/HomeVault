@@ -116,6 +116,10 @@ def create_item(client: TestClient, headers: dict[str, str], ids: dict[str, int]
     return response.json()
 
 
+def csv_upload(content: str) -> dict[str, tuple[str, bytes, str]]:
+    return {"file": ("items.csv", content.encode("utf-8"), "text/csv")}
+
+
 def test_admin_can_create_list_detail_update_and_archive_item(client: TestClient, db_session: Session) -> None:
     headers = login(client)
     ids = inventory_ids(db_session)
@@ -379,6 +383,146 @@ def test_inventory_csv_export_supports_filters_selection_and_privacy(client: Tes
     assert rows["Book archive"]["description"] == "Public notes"
     assert rows["Passport folder"]["description"] == "******"
     assert rows["Passport folder"]["custom_fields"] == "Passport number=******"
+
+
+def test_inventory_import_template_includes_static_and_custom_columns(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    db_session.add(
+        AttributeDefinition(
+            category_id=ids["category_id"],
+            key="serial_number",
+            name="Serial number",
+            field_type="text",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/items/import/template.csv", headers=headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    header = response.text.splitlines()[0].split(",")
+    assert header[:14] == [
+        "name",
+        "description",
+        "category",
+        "status",
+        "quantity",
+        "unit",
+        "owner",
+        "keeper",
+        "residence",
+        "location",
+        "container",
+        "is_container",
+        "privacy_level",
+        "tags",
+    ]
+    assert "field:serial_number" in header
+
+
+def test_inventory_import_preview_validates_rows_without_creating_items(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            'Imported folder,From CSV,documents,in_stock,3,pcs,Alex,Alex,Main residence,Shelf,,true,sensitive,"Travel, Paper"',
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+    item_count = db_session.scalar(select(Item.id).where(Item.name == "Imported folder").limit(1))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"]
+    assert body["total_count"] == 1
+    assert body["valid_count"] == 1
+    assert body["invalid_count"] == 0
+    assert body["rows"][0]["row_number"] == 2
+    assert body["rows"][0]["is_valid"] is True
+    assert body["rows"][0]["normalized"]["name"] == "Imported folder"
+    assert body["rows"][0]["normalized"]["privacy_level"] == "sensitive"
+    assert body["rows"][0]["warnings"] == []
+    assert item_count is None
+
+
+def test_inventory_import_preview_reports_row_errors(client: TestClient) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            ",Missing name,documents,in_stock,abc,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+            "Bad category,,unknown,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"] is None
+    assert body["total_count"] == 2
+    assert body["valid_count"] == 0
+    assert body["invalid_count"] == 2
+    assert body["rows"][0]["is_valid"] is False
+    assert {error["field"] for error in body["rows"][0]["errors"]} == {"name", "quantity"}
+    assert body["rows"][1]["errors"][0]["field"] == "category"
+
+
+def test_inventory_import_confirm_creates_previewed_items(client: TestClient, db_session: Session) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            'Imported folder,From CSV,documents,in_stock,3,pcs,Alex,Alex,Main residence,Shelf,,true,normal,"Travel, Paper"',
+            "Imported envelope,Second row,documents,in_stock,1,pcs,Alex,Alex,Main residence,Drawer,,false,normal,Paper",
+        ]
+    )
+    preview = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+    token = preview.json()["token"]
+
+    response = client.post("/api/items/import/confirm", headers=headers, json={"token": token})
+    imported_items = db_session.scalars(select(Item).where(Item.name.like("Imported%")).order_by(Item.name)).all()
+
+    assert response.status_code == 200
+    assert response.json()["imported_count"] == 2
+    assert len(response.json()["item_ids"]) == 2
+    assert [item.name for item in imported_items] == ["Imported envelope", "Imported folder"]
+    assert imported_items[1].quantity == 3
+    assert imported_items[1].is_container is True
+    assert imported_items[1].tag_links[0].tag.normalized_name == "paper"
+
+
+def test_inventory_import_confirm_rejects_invalid_token(client: TestClient) -> None:
+    headers = login(client)
+    response = client.post("/api/items/import/confirm", headers=headers, json={"token": "missing-token"})
+    assert response.status_code == 400
+    assert response.json()["message"]
+
+
+def test_inventory_import_requires_create_permission(client: TestClient) -> None:
+    viewer_headers = login(client, "viewer", "Viewer123!")
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Imported folder,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+    template = client.get("/api/items/import/template.csv", headers=viewer_headers)
+    preview = client.post("/api/items/import/preview", headers=viewer_headers, files=csv_upload(content))
+    confirm = client.post("/api/items/import/confirm", headers=viewer_headers, json={"token": "any"})
+    assert template.status_code == 403
+    assert preview.status_code == 403
+    assert confirm.status_code == 403
 
 
 def test_non_admin_inventory_reads_redact_sensitive_content(client: TestClient, db_session: Session) -> None:

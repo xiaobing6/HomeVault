@@ -11,6 +11,9 @@ from app.schemas.inventory import (
     BulkItemOperationResponse,
     BulkMoveItemsRequest,
     ChangeStatusRequest,
+    ImportConfirmRequest,
+    ImportConfirmResponse,
+    ImportPreviewResponse,
     ItemAttachmentResponse,
     ItemCreate,
     ItemDetailResponse,
@@ -55,6 +58,11 @@ from app.services.inventory import (
     return_loan,
     update_item,
     update_item_image_metadata,
+)
+from app.services.inventory_import import (
+    confirm_inventory_import,
+    import_template_csv,
+    preview_inventory_import,
 )
 
 READ_PERMISSION = "items:view"
@@ -128,6 +136,39 @@ def export_inventory_items(
             "Content-Disposition": 'attachment; filename="homevault-items.csv"',
         },
     )
+
+
+@router.get("/items/import/template.csv")
+def inventory_import_template(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(CREATE_PERMISSION)),
+) -> Response:
+    content = import_template_csv(db)
+    return Response(
+        content=content,
+        headers={
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": 'attachment; filename="homevault-items-import-template.csv"',
+        },
+    )
+
+
+@router.post("/items/import/preview", response_model=ImportPreviewResponse)
+async def preview_inventory_items_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(CREATE_PERMISSION)),
+) -> ImportPreviewResponse:
+    return preview_inventory_import(db, await file.read())
+
+
+@router.post("/items/import/confirm", response_model=ImportConfirmResponse)
+def confirm_inventory_items_import(
+    payload: ImportConfirmRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(CREATE_PERMISSION)),
+) -> ImportConfirmResponse:
+    return confirm_inventory_import(db, payload.token, actor_id=user.id)
 
 
 @router.get("/items/{item_id}", response_model=ItemDetailResponse)

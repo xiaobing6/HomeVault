@@ -475,12 +475,11 @@ def parse_multi_select_value(definition: AttributeDefinition, raw_value: str) ->
     return [item.strip() for item in stripped_value.split(",") if item.strip()]
 
 
-def create_item(
+def create_item_record(
     db: Session,
     payload: ItemCreate,
     actor_id: int | None = None,
-    include_sensitive: bool = True,
-) -> ItemDetailResponse:
+) -> Item:
     name = payload.name.strip()
     if name == "":
         raise bad_request("\u7269\u54c1\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a")
@@ -529,6 +528,16 @@ def create_item(
             actor_id=actor_id,
         )
     )
+    return item
+
+
+def create_item(
+    db: Session,
+    payload: ItemCreate,
+    actor_id: int | None = None,
+    include_sensitive: bool = True,
+) -> ItemDetailResponse:
+    item = create_item_record(db, payload, actor_id=actor_id)
     item_id = item.id
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
     return get_item_detail(db, item_id, include_sensitive=include_sensitive)

@@ -326,6 +326,37 @@ class ItemExportRequest(RequestModel):
         return ItemIdBatchMixin(item_ids=item_ids).item_ids
 
 
+class ImportFieldMessage(ResponseModel):
+    field: str
+    message: str
+
+
+class ImportRowPreview(ResponseModel):
+    row_number: int
+    original: dict[str, str] = Field(default_factory=dict)
+    normalized: dict[str, object] | None = None
+    errors: list[ImportFieldMessage] = Field(default_factory=list)
+    warnings: list[ImportFieldMessage] = Field(default_factory=list)
+    is_valid: bool
+
+
+class ImportPreviewResponse(ResponseModel):
+    token: str | None = None
+    rows: list[ImportRowPreview] = Field(default_factory=list)
+    total_count: int
+    valid_count: int
+    invalid_count: int
+
+
+class ImportConfirmRequest(RequestModel):
+    token: str = Field(min_length=1, max_length=200)
+
+
+class ImportConfirmResponse(ResponseModel):
+    imported_count: int
+    item_ids: list[int] = Field(default_factory=list)
+
+
 class ItemImageUpdate(RequestModel):
     is_primary: bool | None = None
     sort_order: int | None = Field(default=None, ge=0)
