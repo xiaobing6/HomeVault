@@ -27,6 +27,7 @@ from app.services.inventory import (
     create_item_record,
     flush_or_bad_request,
     normalize_attribute_value,
+    validate_basic_placement,
 )
 
 
@@ -167,6 +168,17 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
     container = resolve_container(db, original.get("container", ""), errors)
     if location is not None and container is not None:
         errors.append(field_error("location", "位置和容器不能同时填写"))
+
+    if item_status is not None and not has_field_error(errors, {"location", "container"}):
+        try:
+            validate_basic_placement(
+                db,
+                item_status,
+                location.id if location is not None else None,
+                container.id if container is not None else None,
+            )
+        except HTTPException as exc:
+            errors.append(field_error("row", error_message(exc)))
 
     attribute_values: list[ItemAttributeValueInput] = []
     if category is not None:
@@ -429,6 +441,10 @@ def utcnow() -> datetime:
 
 def field_error(field: str, message: str) -> ImportFieldMessage:
     return ImportFieldMessage(field=field, message=message)
+
+
+def has_field_error(errors: list[ImportFieldMessage], fields: set[str]) -> bool:
+    return any(error.field in fields for error in errors)
 
 
 def error_message(exc: HTTPException) -> str:

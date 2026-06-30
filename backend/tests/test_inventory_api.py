@@ -612,6 +612,44 @@ def test_inventory_import_preview_rejects_ambiguous_containers(
     }
 
 
+def test_inventory_import_preview_rejects_in_stock_without_placement(client: TestClient) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "No placement,From CSV,documents,in_stock,1,pcs,Alex,Alex,,,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"] is None
+    assert body["invalid_count"] == 1
+    assert body["rows"][0]["is_valid"] is False
+    assert {error["field"] for error in body["rows"][0]["errors"]} & {"location", "container", "row"}
+
+
+def test_inventory_import_preview_rejects_exit_status_with_placement(client: TestClient) -> None:
+    headers = login(client)
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Removed with shelf,From CSV,documents,discarded,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"] is None
+    assert body["invalid_count"] == 1
+    assert body["rows"][0]["is_valid"] is False
+    assert {error["field"] for error in body["rows"][0]["errors"]} & {"location", "container", "row"}
+
+
 def test_non_admin_inventory_reads_redact_sensitive_content(client: TestClient, db_session: Session) -> None:
     admin_headers = login(client)
     editor_headers = login(client, "editor", "Editor123!")
