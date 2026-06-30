@@ -78,7 +78,7 @@ def read_import_csv(content: bytes) -> list[tuple[int, dict[str, str]]]:
     text = content.decode("utf-8-sig")
     reader = csv.DictReader(StringIO(text))
     if not reader.fieldnames:
-        raise bad_request("CSV file is empty")
+        raise bad_request("CSV 文件不能为空")
 
     rows: list[tuple[int, dict[str, str]]] = []
     for row_number, row in enumerate(reader, start=2):
@@ -91,10 +91,10 @@ def read_import_csv(content: bytes) -> list[tuple[int, dict[str, str]]]:
             continue
         rows.append((row_number, normalized))
         if len(rows) > MAX_IMPORT_ROWS:
-            raise bad_request(f"Import is limited to {MAX_IMPORT_ROWS} rows")
+            raise bad_request(f"一次最多导入 {MAX_IMPORT_ROWS} 行")
 
     if not rows:
-        raise bad_request("CSV file is empty")
+        raise bad_request("CSV 文件不能为空")
     return rows
 
 
@@ -120,18 +120,18 @@ def confirm_inventory_import(db: Session, token: str, actor_id: int | None = Non
     cached = _IMPORT_CACHE.get(token)
     if cached is None or cached.expires_at <= utcnow():
         _IMPORT_CACHE.pop(token, None)
-        raise bad_request("Import preview expired; upload the CSV again")
+        raise bad_request("导入预览已失效，请重新上传 CSV")
 
     item_ids: list[int] = []
     try:
         for payload in cached.payloads:
             item = create_item_record(db, payload, actor_id=actor_id)
-            flush_or_bad_request(db, "Failed to save item")
+            flush_or_bad_request(db, "物品保存失败")
             item_ids.append(item.id)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise bad_request("Failed to save item") from exc
+        raise bad_request("物品保存失败") from exc
     except Exception:
         db.rollback()
         raise
@@ -147,15 +147,15 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
 
     name = original.get("name", "").strip()
     if name == "":
-        errors.append(field_error("name", "Name is required"))
+        errors.append(field_error("name", "物品名称不能为空"))
 
     category = resolve_category(db, original.get("category", ""))
     if category is None:
-        errors.append(field_error("category", "Category does not exist"))
+        errors.append(field_error("category", "分类不存在"))
 
     item_status = resolve_status(db, original.get("status", ""))
     if item_status is None:
-        errors.append(field_error("status", "Status does not exist"))
+        errors.append(field_error("status", "状态不存在"))
 
     quantity = parse_quantity(original.get("quantity", ""), errors)
     is_container = parse_bool(original.get("is_container", ""), "is_container", errors, default=False)
@@ -166,13 +166,13 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
     location = resolve_location(db, original.get("location", ""), residence, errors)
     container = resolve_container(db, original.get("container", ""), errors)
     if location is not None and container is not None:
-        errors.append(field_error("location", "Location and container cannot both be set"))
+        errors.append(field_error("location", "位置和容器不能同时填写"))
 
     attribute_values: list[ItemAttributeValueInput] = []
     if category is not None:
         attribute_values = parse_dynamic_fields(db, category, original, errors)
         if name and duplicate_active_item_exists(db, name, category.id):
-            warnings.append(field_error("name", "An active item with the same name and category already exists"))
+            warnings.append(field_error("name", "已存在同名同分类的未归档物品"))
 
     tags = parse_tags(original.get("tags", ""))
     normalized = None
@@ -183,7 +183,7 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
             "category_id": category.id,
             "status_id": item_status.id,
             "quantity": str(quantity),
-            "unit": original.get("unit", "") or "pcs",
+            "unit": original.get("unit", "") or "件",
             "owner_member_id": owner.id if owner is not None else None,
             "keeper_member_id": keeper.id if keeper is not None else None,
             "location_node_id": location.id if location is not None else None,
@@ -195,8 +195,8 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
         }
         try:
             ItemCreate.model_validate(normalized)
-        except ValueError as exc:
-            errors.append(field_error("row", str(exc)))
+        except ValueError:
+            errors.append(field_error("row", "导入行格式不正确"))
             normalized = None
 
     return ImportRowPreview(
@@ -237,15 +237,18 @@ def resolve_member(db: Session, raw_value: str, field: str, errors: list[ImportF
     value = raw_value.strip()
     if value == "":
         return None
-    member = db.scalar(
+    members = db.scalars(
         select(FamilyMember)
         .where(FamilyMember.is_active.is_(True), FamilyMember.name == value)
         .order_by(FamilyMember.id)
-        .limit(1)
-    )
-    if member is None:
-        errors.append(field_error(field, "Family member does not exist"))
-    return member
+    ).all()
+    if not members:
+        errors.append(field_error(field, "家庭成员不存在"))
+        return None
+    if len(members) > 1:
+        errors.append(field_error(field, "家庭成员名称不唯一，请进一步区分"))
+        return None
+    return members[0]
 
 
 def resolve_residence(db: Session, raw_value: str, errors: list[ImportFieldMessage]) -> Residence | None:
@@ -259,7 +262,7 @@ def resolve_residence(db: Session, raw_value: str, errors: list[ImportFieldMessa
         .limit(1)
     )
     if residence is None:
-        errors.append(field_error("residence", "Residence does not exist"))
+        errors.append(field_error("residence", "住所不存在"))
     return residence
 
 
@@ -280,27 +283,36 @@ def resolve_location(
     )
     if residence is not None:
         stmt = stmt.where(LocationNode.residence_id == residence.id)
-    locations = db.scalars(stmt).all()
-    for location in locations:
-        if location.name == value or location_path(location) == value:
-            return location
-    errors.append(field_error("location", "Location does not exist"))
-    return None
+    matches = [
+        location
+        for location in db.scalars(stmt).all()
+        if location.name == value or location_path(location) == value
+    ]
+    if not matches:
+        errors.append(field_error("location", "位置不存在"))
+        return None
+    if len(matches) > 1:
+        errors.append(field_error("location", "位置名称不唯一，请填写住所或完整路径"))
+        return None
+    return matches[0]
 
 
 def resolve_container(db: Session, raw_value: str, errors: list[ImportFieldMessage]) -> Item | None:
     value = raw_value.strip()
     if value == "":
         return None
-    container = db.scalar(
+    containers = db.scalars(
         select(Item)
         .where(Item.is_archived.is_(False), Item.is_container.is_(True), Item.name == value)
         .order_by(Item.id)
-        .limit(1)
-    )
-    if container is None:
-        errors.append(field_error("container", "Container does not exist"))
-    return container
+    ).all()
+    if not containers:
+        errors.append(field_error("container", "容器不存在"))
+        return None
+    if len(containers) > 1:
+        errors.append(field_error("container", "容器名称不唯一，请进一步区分"))
+        return None
+    return containers[0]
 
 
 def parse_dynamic_fields(
@@ -321,7 +333,7 @@ def parse_dynamic_fields(
         raw_value = original.get(field, "").strip()
         if raw_value == "":
             if definition.is_required:
-                errors.append(field_error(field, f"{definition.name} is required"))
+                errors.append(field_error(field, f"{definition.name}不能为空"))
             continue
         try:
             normalized_value = normalize_attribute_value(definition, raw_value)
@@ -339,10 +351,10 @@ def parse_quantity(raw_value: str, errors: list[ImportFieldMessage]) -> Decimal:
     try:
         quantity = Decimal(value)
     except (InvalidOperation, ValueError):
-        errors.append(field_error("quantity", "Quantity format is invalid"))
+        errors.append(field_error("quantity", "数量格式不正确"))
         return Decimal("0")
     if not quantity.is_finite():
-        errors.append(field_error("quantity", "Quantity format is invalid"))
+        errors.append(field_error("quantity", "数量格式不正确"))
         return Decimal("0")
     return quantity
 
@@ -361,7 +373,7 @@ def parse_bool(
         return True
     if value in {"false", "0", "no", "n"}:
         return False
-    errors.append(field_error(field, "Boolean format is invalid"))
+    errors.append(field_error(field, "布尔值格式不正确"))
     return default
 
 
@@ -371,7 +383,7 @@ def parse_privacy_level(raw_value: str, errors: list[ImportFieldMessage]) -> str
         return "sensitive"
     if value in {"normal", "sensitive"}:
         return value
-    errors.append(field_error("privacy_level", "Privacy level is invalid"))
+    errors.append(field_error("privacy_level", "隐私级别不正确"))
     return "normal"
 
 
@@ -425,4 +437,4 @@ def error_message(exc: HTTPException) -> str:
         return detail["message"]
     if isinstance(detail, str):
         return detail
-    return "Field format is invalid"
+    return "字段格式不正确"

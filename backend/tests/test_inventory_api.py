@@ -525,6 +525,93 @@ def test_inventory_import_requires_create_permission(client: TestClient) -> None
     assert confirm.status_code == 403
 
 
+def test_inventory_import_preview_rejects_ambiguous_members(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    home = db_session.scalar(select(HomeSpace).order_by(HomeSpace.id))
+    assert home is not None
+    db_session.add(FamilyMember(home_space=home, name="Alex", relation="Backup owner"))
+    db_session.commit()
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Imported folder,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"] is None
+    assert body["invalid_count"] == 1
+    errors = {error["field"]: error["message"] for error in body["rows"][0]["errors"]}
+    assert errors["owner"] == "家庭成员名称不唯一，请进一步区分"
+    assert errors["keeper"] == "家庭成员名称不唯一，请进一步区分"
+
+
+def test_inventory_import_preview_rejects_ambiguous_locations_without_residence(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    home = db_session.scalar(select(HomeSpace).order_by(HomeSpace.id))
+    assert home is not None
+    other_residence = Residence(name="Cabin", home_space=home, sort_order=20)
+    db_session.add(LocationNode(residence=other_residence, name="Shelf", node_type="shelf", sort_order=10))
+    db_session.commit()
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Ambiguous shelf,From CSV,documents,in_stock,1,pcs,Alex,Alex,,Shelf,,false,normal,",
+            "Scoped shelf,From CSV,documents,in_stock,1,pcs,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"] is None
+    assert body["valid_count"] == 1
+    assert body["invalid_count"] == 1
+    assert body["rows"][0]["errors"][0] == {
+        "field": "location",
+        "message": "位置名称不唯一，请填写住所或完整路径",
+    }
+    assert body["rows"][1]["is_valid"] is True
+    assert body["rows"][1]["normalized"]["name"] == "Scoped shelf"
+
+
+def test_inventory_import_preview_rejects_ambiguous_containers(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    create_item(client, headers, ids, name="Shared box", is_container=True, location_node_id=ids["shelf_id"])
+    create_item(client, headers, ids, name="Shared box", is_container=True, location_node_id=ids["drawer_id"])
+    content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Imported folder,From CSV,documents,in_stock,1,pcs,Alex,Alex,,,Shared box,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token"] is None
+    assert body["invalid_count"] == 1
+    assert body["rows"][0]["errors"][0] == {
+        "field": "container",
+        "message": "容器名称不唯一，请进一步区分",
+    }
+
+
 def test_non_admin_inventory_reads_redact_sensitive_content(client: TestClient, db_session: Session) -> None:
     admin_headers = login(client)
     editor_headers = login(client, "editor", "Editor123!")
