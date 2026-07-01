@@ -564,3 +564,91 @@ def test_viewer_cannot_create_configuration(client: TestClient, db_session: Sess
 
     assert response.status_code == 403
     assert response.json()["message"] == "你没有权限执行此操作"
+
+
+def test_location_node_type_must_use_enabled_dictionary_option(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    location_group = next(
+        group for group in bootstrap.json()["dictionary_groups"] if group["code"] == "location_node_types"
+    )
+    room_option_id = next(option["id"] for option in location_group["options"] if option["value"] == "room")
+
+    response = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Main", "description": "", "address": "", "sort_order": 1},
+    )
+    assert response.status_code == 201
+    residence_id = response.json()["id"]
+
+    unknown = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence_id, "name": "Unknown", "node_type": "drawer"},
+    )
+    assert unknown.status_code == 400
+
+    disable = client.patch(
+        f"/api/config/dictionary-options/{room_option_id}",
+        headers=headers,
+        json={"label": "\u623f\u95f4", "sort_order": 10, "is_active": False},
+    )
+    assert disable.status_code == 200
+
+    disabled = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence_id, "name": "Bedroom", "node_type": "room"},
+    )
+    assert disabled.status_code == 400
+
+
+def test_location_update_allows_unchanged_disabled_node_type(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    residence = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Main", "description": "", "address": "", "sort_order": 1},
+    )
+    assert residence.status_code == 201
+    location = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence.json()["id"], "name": "Bedroom", "node_type": "room"},
+    )
+    assert location.status_code == 201
+
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    location_group = next(
+        group for group in bootstrap.json()["dictionary_groups"] if group["code"] == "location_node_types"
+    )
+    room_option_id = next(option["id"] for option in location_group["options"] if option["value"] == "room")
+    disable = client.patch(
+        f"/api/config/dictionary-options/{room_option_id}",
+        headers=headers,
+        json={"label": "\u623f\u95f4", "sort_order": 10, "is_active": False},
+    )
+    assert disable.status_code == 200
+
+    unchanged = client.patch(
+        f"/api/config/location-nodes/{location.json()['id']}",
+        headers=headers,
+        json={
+            "parent_id": None,
+            "name": "Bedroom updated",
+            "node_type": "room",
+            "icon": "",
+            "sort_order": 5,
+            "note": "",
+            "is_active": True,
+        },
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json()["node_type"] == "room"

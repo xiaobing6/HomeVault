@@ -52,6 +52,7 @@ from app.schemas.configuration import (
     ResidenceUpdate,
 )
 from app.services.audit import record_audit_log
+from app.services.dictionaries import require_active_dictionary_value
 from app.services.privacy import normalize_privacy_level
 
 HOME_SPACE_NAME = "我们家"
@@ -101,6 +102,8 @@ CORE_DICTIONARY_GROUPS = [
 ]
 
 ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE = "\u542f\u7528\u4f4f\u5b85\u540d\u79f0\u5df2\u5b58\u5728"
+LOCATION_NODE_TYPE_GROUP = "location_node_types"
+LOCATION_NODE_TYPE_INVALID_MESSAGE = "\u4f4d\u7f6e\u7c7b\u578b\u4e0d\u5408\u6cd5"
 
 
 def commit_or_bad_request(db: Session, message: str) -> None:
@@ -508,12 +511,18 @@ def create_location_node(
     if residence is None:
         raise bad_request("住宅不存在")
     assert_location_parent_valid(db, payload.residence_id, payload.parent_id)
+    node_type = require_active_dictionary_value(
+        db,
+        LOCATION_NODE_TYPE_GROUP,
+        payload.node_type,
+        message=LOCATION_NODE_TYPE_INVALID_MESSAGE,
+    )
 
     node = LocationNode(
         residence_id=payload.residence_id,
         parent_id=payload.parent_id,
         name=payload.name,
-        node_type=payload.node_type,
+        node_type=node_type,
         icon=payload.icon,
         sort_order=payload.sort_order,
         note=payload.note,
@@ -690,15 +699,23 @@ def update_location_node(
     db: Session,
     node_id: int,
     payload: LocationNodeUpdate,
+    actor: User | None = None,
 ) -> LocationNodeResponse:
     node = db.get(LocationNode, node_id)
     if node is None:
         raise bad_request("Location node not found")
 
     assert_location_parent_valid(db, node.residence_id, payload.parent_id, current_id=node_id)
+    node_type = require_active_dictionary_value(
+        db,
+        LOCATION_NODE_TYPE_GROUP,
+        payload.node_type,
+        message=LOCATION_NODE_TYPE_INVALID_MESSAGE,
+        allow_existing_value=node.node_type,
+    )
     node.parent_id = payload.parent_id
     node.name = payload.name
-    node.node_type = payload.node_type
+    node.node_type = node_type
     node.icon = payload.icon
     node.sort_order = payload.sort_order
     node.note = payload.note

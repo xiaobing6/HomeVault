@@ -173,7 +173,7 @@ def update_location_node(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("config:manage")),
 ) -> LocationNodeResponse:
-    return update_location_node_record(db, node_id, payload)
+    return update_location_node_record(db, node_id, payload, actor=user)
 
 
 @router.post("/family-members", response_model=FamilyMemberResponse, status_code=status.HTTP_201_CREATED)
