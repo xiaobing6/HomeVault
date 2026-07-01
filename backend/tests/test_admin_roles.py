@@ -300,6 +300,27 @@ def test_inactive_custom_role_cannot_be_assigned_until_reactivated(client: TestC
     assert inactive_user.status_code == 400
     assert inactive_user.json()["message"] == INACTIVE_ROLE_ASSIGNMENT_MESSAGE
 
+    update_target = client.post(
+        "/api/admin/users",
+        headers=headers,
+        json={
+            "username": "activeuser",
+            "display_name": "Active User",
+            "password": "Active123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert update_target.status_code == 201
+    update_user_id = update_target.json()["id"]
+
+    inactive_user_update = client.patch(
+        f"/api/admin/users/{update_user_id}",
+        headers=headers,
+        json={"display_name": "Active User", "is_active": True, "role_codes": ["inactivekeeper"]},
+    )
+    assert inactive_user_update.status_code == 400
+    assert inactive_user_update.json()["message"] == INACTIVE_ROLE_ASSIGNMENT_MESSAGE
+
     reactivated = client.patch(
         f"/api/admin/roles/{role_id}",
         headers=headers,
