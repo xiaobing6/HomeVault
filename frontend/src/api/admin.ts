@@ -12,6 +12,7 @@ export interface AdminRole {
   name: string
   description: string
   is_system: boolean
+  is_active: boolean
   permissions: AdminPermission[]
 }
 
@@ -58,6 +59,21 @@ export interface AdminPasswordResetRequest {
   password: string
 }
 
+export interface AdminRoleCreateRequest {
+  code: string
+  name: string
+  description: string
+  permission_codes: string[]
+  is_active: boolean
+}
+
+export interface AdminRoleUpdateRequest {
+  name: string
+  description: string
+  permission_codes: string[]
+  is_active: boolean
+}
+
 export async function listAdminUsersApi(filters: AdminUserFilters = {}): Promise<AdminUserListResponse> {
   const response = await apiClient.get<AdminUserListResponse>('/admin/users', { params: filters })
   return response.data
@@ -65,6 +81,16 @@ export async function listAdminUsersApi(filters: AdminUserFilters = {}): Promise
 
 export async function fetchAdminRolesApi(): Promise<AdminRole[]> {
   const response = await apiClient.get<AdminRole[]>('/admin/roles')
+  return response.data
+}
+
+export async function createAdminRoleApi(payload: AdminRoleCreateRequest): Promise<AdminRole> {
+  const response = await apiClient.post<AdminRole>('/admin/roles', payload)
+  return response.data
+}
+
+export async function updateAdminRoleApi(roleId: number, payload: AdminRoleUpdateRequest): Promise<AdminRole> {
+  const response = await apiClient.patch<AdminRole>(`/admin/roles/${roleId}`, payload)
   return response.data
 }
 

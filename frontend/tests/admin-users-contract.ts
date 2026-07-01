@@ -1,11 +1,15 @@
 import {
+  createAdminRoleApi,
   createAdminUserApi,
   fetchAdminRolesApi,
   listAdminUsersApi,
   resetAdminUserPasswordApi,
+  updateAdminRoleApi,
   updateAdminUserApi,
   type AdminPasswordResetRequest,
   type AdminRole,
+  type AdminRoleCreateRequest,
+  type AdminRoleUpdateRequest,
   type AdminUser,
   type AdminUserCreateRequest,
   type AdminUserFilters,
@@ -49,6 +53,32 @@ const resetPayload: AdminPasswordResetRequest = {
   password: 'new-password'
 }
 
+const roleResponse: AdminRole = {
+  id: 1,
+  code: 'viewer',
+  name: 'Viewer',
+  description: 'Read only',
+  is_system: true,
+  is_active: true,
+  permissions: []
+}
+expectType<boolean>(roleResponse.is_active)
+
+const roleCreatePayload: AdminRoleCreateRequest = {
+  code: 'caretaker',
+  name: 'Caretaker',
+  description: 'Maintains inventory',
+  permission_codes: ['items:view'],
+  is_active: true
+}
+
+const roleUpdatePayload: AdminRoleUpdateRequest = {
+  name: 'Caretaker Plus',
+  description: 'Maintains inventory and loans',
+  permission_codes: ['items:view', 'items:edit'],
+  is_active: false
+}
+
 const residenceUpdatePayload: ResidenceUpdate = {
   name: 'Main Home',
   description: 'Primary residence',
@@ -63,6 +93,8 @@ async function assertAdminUsersApiContract() {
   expectType<AdminUser>(await createAdminUserApi(createPayload))
   expectType<AdminUser>(await updateAdminUserApi(1, updatePayload))
   expectType<AdminUser>(await resetAdminUserPasswordApi(1, resetPayload))
+  expectType<AdminRole>(await createAdminRoleApi(roleCreatePayload))
+  expectType<AdminRole>(await updateAdminRoleApi(1, roleUpdatePayload))
 }
 
 async function assertResidenceConfigurationContract() {
@@ -95,6 +127,9 @@ async function assertAdminUsersStoreContract() {
   expectType<AdminUser>(await adminUsers.updateUser(1, updatePayload))
   expectType<AdminUser>(await adminUsers.resetPassword(1, resetPayload))
   expectType<AdminUser>(await adminUsers.saveAndRefresh(() => updateAdminUserApi(1, updatePayload)))
+  expectType<AdminRole>(await adminUsers.createRole(roleCreatePayload))
+  expectType<AdminRole>(await adminUsers.updateRole(1, roleUpdatePayload))
+  expectType<AdminRole>(await adminUsers.saveRoleAndRefresh(() => updateAdminRoleApi(1, roleUpdatePayload)))
 }
 
 void assertAdminUsersApiContract

@@ -1,13 +1,17 @@
 import { defineStore } from 'pinia'
 
 import {
+  createAdminRoleApi,
   createAdminUserApi,
   fetchAdminRolesApi,
   listAdminUsersApi,
   resetAdminUserPasswordApi,
+  updateAdminRoleApi,
   updateAdminUserApi,
   type AdminPasswordResetRequest,
   type AdminRole,
+  type AdminRoleCreateRequest,
+  type AdminRoleUpdateRequest,
   type AdminUser,
   type AdminUserCreateRequest,
   type AdminUserFilters,
@@ -153,6 +157,12 @@ export const useAdminUsersStore = defineStore('adminUsers', {
     async resetPassword(userId: number, payload: AdminPasswordResetRequest): Promise<AdminUser> {
       return await this.saveAndRefresh(() => resetAdminUserPasswordApi(userId, payload))
     },
+    async createRole(payload: AdminRoleCreateRequest): Promise<AdminRole> {
+      return await this.saveRoleAndRefresh(() => createAdminRoleApi(payload))
+    },
+    async updateRole(roleId: number, payload: AdminRoleUpdateRequest): Promise<AdminRole> {
+      return await this.saveRoleAndRefresh(() => updateAdminRoleApi(roleId, payload))
+    },
     async saveAndRefresh(operation: () => Promise<AdminUser>): Promise<AdminUser> {
       this.saving = true
       try {
@@ -161,6 +171,20 @@ export const useAdminUsersStore = defineStore('adminUsers', {
           await this.loadUsers()
         } catch {
           // A successful mutation should not be reported as failed because a follow-up refresh failed.
+        }
+        return result
+      } finally {
+        this.saving = false
+      }
+    },
+    async saveRoleAndRefresh(operation: () => Promise<AdminRole>): Promise<AdminRole> {
+      this.saving = true
+      try {
+        const result = await operation()
+        try {
+          await Promise.all([this.loadRoles(), this.loadUsers()])
+        } catch {
+          // A successful role mutation should not be reported as failed because follow-up refresh failed.
         }
         return result
       } finally {
