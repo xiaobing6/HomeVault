@@ -9,11 +9,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import bad_request, not_found
 from app.core.security import hash_password
-from app.models.auth import AuthSession, Role, User
+from app.models.auth import AuthSession, Permission, Role, User
 from app.schemas.admin import (
     AdminPasswordReset,
     AdminPermissionResponse,
+    AdminRoleCreate,
     AdminRoleResponse,
+    AdminRoleUpdate,
     AdminUserCreate,
     AdminUserListQuery,
     AdminUserListResponse,
@@ -23,6 +25,13 @@ from app.schemas.admin import (
 from app.services.audit import record_audit_log
 
 _admin_user_update_lock = RLock()
+
+ROLE_REQUIRED_MESSAGE = "角色至少需要一个权限"
+PERMISSION_NOT_FOUND_MESSAGE = "权限不存在"
+SYSTEM_ROLE_READONLY_MESSAGE = "系统角色不能编辑"
+INACTIVE_ROLE_ASSIGNMENT_MESSAGE = "角色未启用"
+DUPLICATE_ROLE_CODE_MESSAGE = "角色编码已存在"
+ROLE_NOT_FOUND_MESSAGE = "角色不存在"
 
 
 def serialize_admin_user(user: User) -> AdminUserResponse:
@@ -70,6 +79,145 @@ def list_roles(db: Session) -> list[AdminRoleResponse]:
     return [serialize_admin_role(role) for role in roles]
 
 
+def normalize_permission_codes(permission_codes: list[str]) -> list[str]:
+    unique_codes = sorted(
+        {
+            permission_code.strip()
+            for permission_code in permission_codes
+            if permission_code.strip()
+        }
+    )
+    if not unique_codes:
+        raise bad_request(ROLE_REQUIRED_MESSAGE)
+    return unique_codes
+
+
+def permission_map_by_code(db: Session, permission_codes: list[str]) -> dict[str, Permission]:
+    unique_codes = normalize_permission_codes(permission_codes)
+    permissions = db.scalars(
+        select(Permission).where(Permission.code.in_(unique_codes))
+    ).all()
+    permissions_by_code = {permission.code: permission for permission in permissions}
+    if set(permissions_by_code) != set(unique_codes):
+        raise bad_request(PERMISSION_NOT_FOUND_MESSAGE)
+    return permissions_by_code
+
+
+def get_role_for_admin(db: Session, role_id: int) -> Role:
+    role = db.scalar(
+        select(Role)
+        .where(Role.id == role_id)
+        .options(selectinload(Role.permissions))
+    )
+    if role is None:
+        raise not_found(ROLE_NOT_FOUND_MESSAGE)
+    return role
+
+
+def create_role(
+    db: Session,
+    payload: AdminRoleCreate,
+    actor: User | None = None,
+) -> AdminRoleResponse:
+    normalized_permission_codes = normalize_permission_codes(payload.permission_codes)
+    permissions_by_code = permission_map_by_code(db, normalized_permission_codes)
+    existing = db.scalar(select(Role.id).where(Role.code == payload.code))
+    if existing is not None:
+        raise bad_request(DUPLICATE_ROLE_CODE_MESSAGE)
+
+    role = Role(
+        code=payload.code,
+        name=payload.name,
+        description=payload.description,
+        is_system=False,
+        is_active=payload.is_active,
+    )
+    role.permissions = [
+        permissions_by_code[permission_code]
+        for permission_code in normalized_permission_codes
+    ]
+    db.add(role)
+    try:
+        db.flush()
+        record_audit_log(
+            db,
+            action="admin.role.create",
+            resource_type="role",
+            actor=actor,
+            resource_id=role.id,
+            resource_label=role.code,
+            metadata={
+                "permission_codes": normalized_permission_codes,
+                "is_active": role.is_active,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise bad_request(DUPLICATE_ROLE_CODE_MESSAGE) from exc
+    db.refresh(role)
+    return serialize_admin_role(role)
+
+
+def update_role(
+    db: Session,
+    role_id: int,
+    payload: AdminRoleUpdate,
+    actor: User | None = None,
+) -> AdminRoleResponse:
+    role = get_role_for_admin(db, role_id)
+    if role.is_system:
+        raise bad_request(SYSTEM_ROLE_READONLY_MESSAGE)
+
+    next_permission_codes = normalize_permission_codes(payload.permission_codes)
+    permissions_by_code = permission_map_by_code(db, next_permission_codes)
+    current_permission_codes = sorted({permission.code for permission in role.permissions})
+    changed_fields: list[str] = []
+    if role.name != payload.name:
+        changed_fields.append("name")
+    if role.description != payload.description:
+        changed_fields.append("description")
+    if current_permission_codes != next_permission_codes:
+        changed_fields.append("permission_codes")
+    active_changed = role.is_active != payload.is_active
+
+    role.name = payload.name
+    role.description = payload.description
+    role.permissions = [
+        permissions_by_code[permission_code]
+        for permission_code in next_permission_codes
+    ]
+    role.is_active = payload.is_active
+
+    if changed_fields:
+        record_audit_log(
+            db,
+            action="admin.role.update",
+            resource_type="role",
+            actor=actor,
+            resource_id=role.id,
+            resource_label=role.code,
+            metadata={
+                "changed_fields": changed_fields,
+                "permission_codes": next_permission_codes,
+                "is_active": role.is_active,
+            },
+        )
+    if active_changed:
+        record_audit_log(
+            db,
+            action="admin.role.activate" if role.is_active else "admin.role.deactivate",
+            resource_type="role",
+            actor=actor,
+            resource_id=role.id,
+            resource_label=role.code,
+            metadata={"is_active": role.is_active},
+        )
+    db.commit()
+    db.refresh(role)
+    return serialize_admin_role(role)
+
+
 def normalize_role_codes(role_codes: list[str]) -> list[str]:
     unique_codes = sorted({role_code.strip() for role_code in role_codes if role_code.strip()})
     if not unique_codes:
@@ -88,6 +236,8 @@ def role_map_by_code(db: Session, role_codes: list[str]) -> dict[str, Role]:
     roles_by_code = {role.code: role for role in roles}
     if set(roles_by_code) != set(unique_codes):
         raise bad_request("角色不存在")
+    if any(not role.is_system and not role.is_active for role in roles_by_code.values()):
+        raise bad_request(INACTIVE_ROLE_ASSIGNMENT_MESSAGE)
     return roles_by_code
 
 

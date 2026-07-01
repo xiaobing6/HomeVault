@@ -5,7 +5,9 @@ from app.api.deps import get_db, require_permission
 from app.models.auth import User
 from app.schemas.admin import (
     AdminPasswordReset,
+    AdminRoleCreate,
     AdminRoleResponse,
+    AdminRoleUpdate,
     AdminUserCreate,
     AdminUserListQuery,
     AdminUserListResponse,
@@ -13,10 +15,12 @@ from app.schemas.admin import (
     AdminUserUpdate,
 )
 from app.services.admin import (
+    create_role as create_role_record,
     create_user as create_user_record,
     list_roles as list_role_records,
     list_users as list_user_records,
     reset_user_password as reset_user_password_record,
+    update_role as update_role_record,
     update_user as update_user_record,
 )
 
@@ -78,3 +82,22 @@ def roles(
     user: User = Depends(require_permission("users:manage")),
 ) -> list[AdminRoleResponse]:
     return list_role_records(db)
+
+
+@router.post("/roles", response_model=AdminRoleResponse, status_code=status.HTTP_201_CREATED)
+def create_role(
+    payload: AdminRoleCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("users:manage")),
+) -> AdminRoleResponse:
+    return create_role_record(db, payload, actor=user)
+
+
+@router.patch("/roles/{role_id}", response_model=AdminRoleResponse)
+def update_role(
+    role_id: int,
+    payload: AdminRoleUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("users:manage")),
+) -> AdminRoleResponse:
+    return update_role_record(db, role_id, payload, actor=user)

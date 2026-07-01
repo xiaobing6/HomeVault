@@ -58,6 +58,38 @@ class AdminPermissionResponse(BaseModel):
     description: str
 
 
+ROLE_REQUIRED_MESSAGE = "角色至少需要一个权限"
+
+
+class AdminRoleCreate(RequestModel):
+    code: str = Field(min_length=1, max_length=80, pattern=r"^[a-z][a-z0-9:_-]*$")
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=255)
+    permission_codes: list[str] = Field(min_length=1)
+    is_active: bool = True
+
+    @field_validator("permission_codes", mode="before")
+    @classmethod
+    def ensure_permission_codes_present(cls, value: object) -> object:
+        if isinstance(value, list) and not value:
+            raise bad_request(ROLE_REQUIRED_MESSAGE)
+        return value
+
+
+class AdminRoleUpdate(RequestModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=255)
+    permission_codes: list[str] = Field(min_length=1)
+    is_active: bool
+
+    @field_validator("permission_codes", mode="before")
+    @classmethod
+    def ensure_permission_codes_present(cls, value: object) -> object:
+        if isinstance(value, list) and not value:
+            raise bad_request(ROLE_REQUIRED_MESSAGE)
+        return value
+
+
 class AdminRoleResponse(BaseModel):
     id: int
     code: str
