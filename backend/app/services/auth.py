@@ -10,14 +10,19 @@ from app.models.auth import AuthSession, Role, User
 from app.schemas.user import CurrentUserResponse
 
 
-def serialize_current_user(user: User) -> CurrentUserResponse:
-    permissions = sorted(
+def effective_permission_codes(user: User) -> list[str]:
+    return sorted(
         {
             permission.code
             for role in user.roles
+            if role.is_active
             for permission in role.permissions
         }
     )
+
+
+def serialize_current_user(user: User) -> CurrentUserResponse:
+    permissions = effective_permission_codes(user)
     roles = sorted({role.code for role in user.roles})
     return CurrentUserResponse(
         id=user.id,

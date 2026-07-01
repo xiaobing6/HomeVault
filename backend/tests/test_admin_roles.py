@@ -345,3 +345,150 @@ def test_inactive_custom_role_cannot_be_assigned_until_reactivated(client: TestC
     )
     assert active_user.status_code == 201
     assert active_user.json()["roles"] == ["inactivekeeper"]
+
+
+def test_inactive_assigned_custom_role_no_longer_grants_permissions(client: TestClient) -> None:
+    admin_headers = login(client)
+
+    created_role = client.post(
+        "/api/admin/roles",
+        headers=admin_headers,
+        json={
+            "code": "custommanager",
+            "name": "Custom Manager",
+            "description": "Can manage users",
+            "permission_codes": ["users:manage"],
+            "is_active": True,
+        },
+    )
+    assert created_role.status_code == 201
+    role_id = created_role.json()["id"]
+
+    created_user = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={
+            "username": "custommanager",
+            "display_name": "Custom Manager",
+            "password": "CustomManager123!",
+            "role_codes": ["custommanager"],
+        },
+    )
+    assert created_user.status_code == 201
+    user_id = created_user.json()["id"]
+
+    user_headers = login(client, "custommanager", "CustomManager123!")
+    allowed = client.get("/api/admin/users", headers=user_headers)
+    assert allowed.status_code == 200
+    active_me = client.get("/api/auth/me", headers=user_headers)
+    assert active_me.status_code == 200
+    assert "users:manage" in active_me.json()["permissions"]
+
+    deactivated = client.patch(
+        f"/api/admin/roles/{role_id}",
+        headers=admin_headers,
+        json={
+            "name": "Custom Manager",
+            "description": "Can manage users",
+            "permission_codes": ["users:manage"],
+            "is_active": False,
+        },
+    )
+    assert deactivated.status_code == 200
+
+    denied = client.get("/api/admin/users", headers=user_headers)
+    assert denied.status_code == 403
+
+    inactive_me = client.get("/api/auth/me", headers=user_headers)
+    assert inactive_me.status_code == 200
+    assert inactive_me.json()["roles"] == ["custommanager"]
+    assert "users:manage" not in inactive_me.json()["permissions"]
+
+    listed = client.get("/api/admin/users", headers=admin_headers)
+    assert listed.status_code == 200
+    listed_user = next(item for item in listed.json()["items"] if item["id"] == user_id)
+    assert listed_user["roles"] == ["custommanager"]
+    assert "users:manage" not in listed_user["permissions"]
+
+
+def test_existing_inactive_custom_role_assignment_can_be_retained_on_user_update(
+    client: TestClient,
+) -> None:
+    admin_headers = login(client)
+
+    created_role = client.post(
+        "/api/admin/roles",
+        headers=admin_headers,
+        json={
+            "code": "retainedinactive",
+            "name": "Retained Inactive",
+            "description": "Assigned before deactivation",
+            "permission_codes": ["items:view"],
+            "is_active": True,
+        },
+    )
+    assert created_role.status_code == 201
+    role_id = created_role.json()["id"]
+
+    existing_user = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={
+            "username": "retaineduser",
+            "display_name": "Retained User",
+            "password": "RetainedUser123!",
+            "role_codes": ["retainedinactive"],
+        },
+    )
+    assert existing_user.status_code == 201
+    existing_user_id = existing_user.json()["id"]
+
+    other_user = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={
+            "username": "otheruser",
+            "display_name": "Other User",
+            "password": "OtherUser123!",
+            "role_codes": ["viewer"],
+        },
+    )
+    assert other_user.status_code == 201
+    other_user_id = other_user.json()["id"]
+
+    deactivated = client.patch(
+        f"/api/admin/roles/{role_id}",
+        headers=admin_headers,
+        json={
+            "name": "Retained Inactive",
+            "description": "Assigned before deactivation",
+            "permission_codes": ["items:view"],
+            "is_active": False,
+        },
+    )
+    assert deactivated.status_code == 200
+
+    retained = client.patch(
+        f"/api/admin/users/{existing_user_id}",
+        headers=admin_headers,
+        json={
+            "display_name": "Retained User Renamed",
+            "is_active": True,
+            "role_codes": ["retainedinactive"],
+        },
+    )
+    assert retained.status_code == 200
+    assert retained.json()["display_name"] == "Retained User Renamed"
+    assert retained.json()["roles"] == ["retainedinactive"]
+
+    newly_assigned = client.patch(
+        f"/api/admin/users/{other_user_id}",
+        headers=admin_headers,
+        json={
+            "display_name": "Other User",
+            "is_active": True,
+            "role_codes": ["retainedinactive"],
+        },
+    )
+    assert newly_assigned.status_code == 400
+    assert newly_assigned.json()["message"] == INACTIVE_ROLE_ASSIGNMENT_MESSAGE

@@ -11,6 +11,7 @@ from app.core.errors import forbidden, unauthorized
 from app.core.security import decode_access_token
 from app.db.session import get_db as session_get_db
 from app.models.auth import AuthSession, Role, User
+from app.services.auth import effective_permission_codes
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -57,11 +58,7 @@ def get_current_user(
 
 def require_permission(permission_code: str):
     def dependency(user: User = Depends(get_current_user)) -> User:
-        user_permissions = {
-            permission.code
-            for role in user.roles
-            for permission in role.permissions
-        }
+        user_permissions = set(effective_permission_codes(user))
         if permission_code not in user_permissions:
             raise forbidden()
         return user

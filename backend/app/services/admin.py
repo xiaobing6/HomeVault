@@ -23,6 +23,7 @@ from app.schemas.admin import (
     AdminUserUpdate,
 )
 from app.services.audit import record_audit_log
+from app.services.auth import effective_permission_codes
 
 _admin_user_update_lock = RLock()
 
@@ -36,13 +37,7 @@ ROLE_NOT_FOUND_MESSAGE = "角色不存在"
 
 def serialize_admin_user(user: User) -> AdminUserResponse:
     roles = sorted({role.code for role in user.roles})
-    permissions = sorted(
-        {
-            permission.code
-            for role in user.roles
-            for permission in role.permissions
-        }
-    )
+    permissions = effective_permission_codes(user)
     return AdminUserResponse(
         id=user.id,
         username=user.username,
@@ -225,8 +220,13 @@ def normalize_role_codes(role_codes: list[str]) -> list[str]:
     return unique_codes
 
 
-def role_map_by_code(db: Session, role_codes: list[str]) -> dict[str, Role]:
+def role_map_by_code(
+    db: Session,
+    role_codes: list[str],
+    allowed_inactive_role_codes: set[str] | None = None,
+) -> dict[str, Role]:
     unique_codes = normalize_role_codes(role_codes)
+    allowed_inactive_role_codes = allowed_inactive_role_codes or set()
 
     roles = db.scalars(
         select(Role)
@@ -236,7 +236,10 @@ def role_map_by_code(db: Session, role_codes: list[str]) -> dict[str, Role]:
     roles_by_code = {role.code: role for role in roles}
     if set(roles_by_code) != set(unique_codes):
         raise bad_request("角色不存在")
-    if any(not role.is_system and not role.is_active for role in roles_by_code.values()):
+    if any(
+        not role.is_system and not role.is_active and role.code not in allowed_inactive_role_codes
+        for role in roles_by_code.values()
+    ):
         raise bad_request(INACTIVE_ROLE_ASSIGNMENT_MESSAGE)
     return roles_by_code
 
@@ -350,11 +353,15 @@ def update_user(
 ) -> AdminUserResponse:
     with _admin_user_update_lock:
         user = get_user_for_admin(db, user_id)
-        roles_by_code = role_map_by_code(db, payload.role_codes)
+        current_role_codes = sorted({role.code for role in user.roles})
+        roles_by_code = role_map_by_code(
+            db,
+            payload.role_codes,
+            allowed_inactive_role_codes=set(current_role_codes),
+        )
         normalized_role_codes = sorted(roles_by_code)
         assert_not_last_active_admin(db, user, payload.is_active, normalized_role_codes)
 
-        current_role_codes = sorted({role.code for role in user.roles})
         changed_fields: list[str] = []
         if user.display_name != payload.display_name:
             changed_fields.append("display_name")
