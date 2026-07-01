@@ -10,7 +10,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import AuditLog
 from app.models.auth import Role, User
-from app.models.configuration import AttributeDefinition, AttributeOption, DictionaryGroup
+from app.models.configuration import AttributeDefinition, AttributeOption, DictionaryOption
 from app.services.seed import seed_auth_baseline
 
 
@@ -519,7 +519,10 @@ def test_admin_updates_existing_dictionary_option_and_writes_audit_log(
     }
 
 
-def test_dictionary_option_value_and_group_are_not_editable(client: TestClient) -> None:
+def test_dictionary_option_value_and_group_are_not_editable(
+    client: TestClient,
+    db_session: Session,
+) -> None:
     headers = login(client)
     bootstrap = client.get("/api/config/bootstrap", headers=headers)
     assert bootstrap.status_code == 200
@@ -535,6 +538,10 @@ def test_dictionary_option_value_and_group_are_not_editable(client: TestClient) 
     assert response.status_code == 200
     assert response.json()["value"] == "medium"
     assert response.json()["group_id"] == option["group_id"]
+    db_option = db_session.get(DictionaryOption, option["id"])
+    assert db_option is not None
+    assert db_option.value == "medium"
+    assert db_option.group_id == option["group_id"]
 
 
 def test_viewer_cannot_create_configuration(client: TestClient, db_session: Session) -> None:

@@ -7,6 +7,7 @@ from app.models.configuration import (
     AttributeDefinition,
     Category,
     DictionaryGroup,
+    DictionaryOption,
     HomeSpace,
     ItemStatus,
     Residence,
@@ -87,6 +88,74 @@ def test_core_configuration_seed_creates_dictionary_options_and_removes_storage_
         "other",
     ]
     assert groups_by_code["units"].options[0].value == "\u4ef6"
+
+
+def test_core_configuration_seed_removes_existing_system_storage_conditions_options(
+    db_session: Session,
+) -> None:
+    storage_group = DictionaryGroup(
+        code="storage_conditions",
+        name="Legacy storage conditions",
+        is_system=True,
+        is_active=True,
+    )
+    db_session.add(storage_group)
+    db_session.flush()
+    db_session.add(
+        DictionaryOption(
+            group_id=storage_group.id,
+            label="Dry",
+            value="dry",
+            sort_order=10,
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    ensure_core_configuration_seed(db_session)
+
+    assert db_session.scalar(
+        select(DictionaryGroup).where(DictionaryGroup.code == "storage_conditions")
+    ) is None
+    assert db_session.scalars(select(DictionaryOption).where(DictionaryOption.value == "dry")).all() == []
+
+
+def test_core_configuration_seed_preserves_existing_dictionary_options_and_inserts_missing_defaults(
+    db_session: Session,
+) -> None:
+    ensure_core_configuration_seed(db_session)
+    importance = db_session.scalar(
+        select(DictionaryGroup)
+        .where(DictionaryGroup.code == "importance")
+        .options(selectinload(DictionaryGroup.options))
+    )
+    assert importance is not None
+    medium = next(option for option in importance.options if option.value == "medium")
+    low = next(option for option in importance.options if option.value == "low")
+
+    medium.label = "Medium edited"
+    medium.sort_order = 99
+    medium.is_active = False
+    db_session.delete(low)
+    db_session.commit()
+
+    ensure_core_configuration_seed(db_session)
+
+    refreshed_importance = db_session.scalar(
+        select(DictionaryGroup)
+        .where(DictionaryGroup.code == "importance")
+        .options(selectinload(DictionaryGroup.options))
+    )
+    assert refreshed_importance is not None
+    options_by_value = {option.value: option for option in refreshed_importance.options}
+
+    assert sorted(option.value for option in refreshed_importance.options) == ["high", "low", "medium"]
+    assert options_by_value["medium"].label == "Medium edited"
+    assert options_by_value["medium"].sort_order == 99
+    assert options_by_value["medium"].is_active is False
+    assert options_by_value["low"].label == "\u4f4e"
+    assert options_by_value["low"].sort_order == 30
+    assert options_by_value["low"].is_active is True
 
 
 def test_core_configuration_seed_reuses_renamed_active_home_space(db_session: Session) -> None:
