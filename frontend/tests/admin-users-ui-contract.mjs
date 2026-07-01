@@ -57,6 +57,28 @@ assert.match(adminUsersPage, /<div class="table-panel">/, 'Admin users page shou
 assert.match(adminUsersPage, /<div class="pagination-row">/, 'Admin users page should include a pagination row')
 assert.match(adminUsersPage, /<div class="roles-panel">/, 'Admin users page should include a roles reference panel')
 
+assert.match(adminUsersPage, /<el-tabs[\s\S]*v-model="activeAdminTab"/, 'Admin users page should use tabs')
+assert.match(adminUsersPage, /name="personnel"/, 'Admin users page should include personnel tab')
+assert.match(adminUsersPage, /name="roles"/, 'Admin users page should include roles tab')
+assert.match(adminUsersPage, /人员管理/, 'Personnel tab should use Chinese label')
+assert.match(adminUsersPage, /角色管理/, 'Role tab should use Chinese label')
+
+assert.match(adminUsersPage, /const\s+assignableRoles\s*=\s*computed/, 'User role assignment should use computed assignable roles')
+assert.match(adminUsersPage, /role\.is_system\s*\|\|\s*role\.is_active/, 'Assignable roles should include system roles and active custom roles')
+assert.match(adminUsersPage, /v-for="role in assignableRoles"/, 'User role checkboxes should use assignable roles')
+
+assert.match(adminUsersPage, /const\s+systemRoles\s*=\s*computed/, 'Page should keep system roles as a computed group')
+assert.match(adminUsersPage, /const\s+customRoles\s*=\s*computed/, 'Page should keep custom roles as a computed group')
+assert.match(adminUsersPage, /openCreateRoleDialog/, 'Role tab should expose create role action')
+assert.match(adminUsersPage, /openEditRoleDialog/, 'Role tab should expose edit role action')
+assert.match(adminUsersPage, /saveRole/, 'Role dialog should save roles through the store')
+assert.match(adminUsersPage, /adminUsers\.createRole/, 'Role create should call store createRole')
+assert.match(adminUsersPage, /adminUsers\.updateRole/, 'Role update should call store updateRole')
+assert.match(adminUsersPage, /roleForm\.permission_codes/, 'Role form should bind selected permission codes')
+assert.match(adminUsersPage, /permission\.description/, 'Role management should display permission descriptions')
+assert.match(adminUsersPage, /row\.is_system/, 'System roles should be treated as read-only in the UI')
+assert.doesNotMatch(adminUsersPage, /deleteRole|removeRole|destroyRole/, 'Role UI should not expose role deletion')
+
 assert.match(adminUsersPage, /const\s+searchDraft\s*=\s*ref\(/, 'Toolbar search should keep local draft state')
 assert.match(adminUsersPage, /v-model="searchDraft"/, 'Toolbar search input should be bound to local draft state')
 assert.doesNotMatch(adminUsersPage, /v-model="searchValue"/, 'Toolbar search input should not write through to store state on input')

@@ -3,9 +3,12 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { Edit, Key, Plus, Refresh, Search } from '@element-plus/icons-vue'
+import { Check, Edit, Key, Plus, Refresh, Search } from '@element-plus/icons-vue'
 
 import type {
+  AdminRole,
+  AdminRoleCreateRequest,
+  AdminRoleUpdateRequest,
   AdminUser,
   AdminUserCreateRequest,
   AdminUserFilters,
@@ -16,6 +19,8 @@ import { useAdminUsersStore } from '../stores/adminUsers'
 import { useAuthStore } from '../stores/auth'
 
 type ActiveFilter = '' | 'active' | 'inactive'
+type AdminTab = 'personnel' | 'roles'
+type RoleDialogMode = 'create' | 'edit'
 type UserDialogMode = 'create' | 'edit'
 type ValidationCallback = (error?: Error) => void
 
@@ -32,18 +37,31 @@ interface ResetPasswordFormModel {
   confirmPassword: string
 }
 
+interface RoleFormModel {
+  code: string
+  name: string
+  description: string
+  permission_codes: string[]
+  is_active: boolean
+}
+
 const adminUsers = useAdminUsersStore()
 const auth = useAuthStore()
 const router = useRouter()
 const { users, roles, total, page, pageSize, loading, saving } = storeToRefs(adminUsers)
 
+const activeAdminTab = ref<AdminTab>('personnel')
 const userDialogOpen = ref(false)
 const resetPasswordDialogOpen = ref(false)
+const roleDialogOpen = ref(false)
 const userDialogMode = ref<UserDialogMode>('create')
+const roleDialogMode = ref<RoleDialogMode>('create')
 const editingUser = ref<AdminUser | null>(null)
 const resettingUser = ref<AdminUser | null>(null)
+const editingRole = ref<AdminRole | null>(null)
 const userFormRef = ref<FormInstance>()
 const resetPasswordFormRef = ref<FormInstance>()
+const roleFormRef = ref<FormInstance>()
 const searchDraft = ref(adminUsers.filters.search ?? '')
 
 const defaultRoleCodes = (): string[] => {
@@ -59,15 +77,35 @@ const defaultUserForm = (): UserFormModel => ({
   is_active: true
 })
 
+const defaultRoleForm = (): RoleFormModel => ({
+  code: '',
+  name: '',
+  description: '',
+  permission_codes: [],
+  is_active: true
+})
+
 const userForm = reactive<UserFormModel>(defaultUserForm())
 const resetPasswordForm = reactive<ResetPasswordFormModel>({
   password: '',
   confirmPassword: ''
 })
+const roleForm = reactive<RoleFormModel>(defaultRoleForm())
 
 const isCreateMode = computed(() => userDialogMode.value === 'create')
+const isRoleCreateMode = computed(() => roleDialogMode.value === 'create')
 const userDialogTitle = computed(() => (isCreateMode.value ? '新建用户' : '编辑用户'))
+const roleDialogTitle = computed(() => (isRoleCreateMode.value ? '新建角色' : '编辑角色'))
+const allPermissions = computed(() => {
+  const byCode = new Map<string, AdminRole['permissions'][number]>()
+  roles.value.forEach((role) => {
+    role.permissions.forEach((permission) => byCode.set(permission.code, permission))
+  })
+  return [...byCode.values()].sort((left, right) => left.code.localeCompare(right.code))
+})
 const systemRoles = computed(() => roles.value.filter((role) => role.is_system))
+const customRoles = computed(() => roles.value.filter((role) => !role.is_system))
+const assignableRoles = computed(() => roles.value.filter((role) => role.is_system || role.is_active))
 
 const roleValue = computed({
   get: () => adminUsers.filters.role ?? '',
@@ -152,6 +190,39 @@ const resetPasswordRules: FormRules<ResetPasswordFormModel> = {
         else callback()
       },
       trigger: 'blur'
+    }
+  ]
+}
+
+const roleRules: FormRules<RoleFormModel> = {
+  code: [
+    {
+      validator: (_rule: unknown, value: string, callback: ValidationCallback) => {
+        const code = value.trim()
+        if (!code) callback(new Error('请输入角色编码'))
+        else if (!/^[a-z][a-z0-9:_-]*$/.test(code)) {
+          callback(new Error('角色编码需以小写字母开头，仅支持小写字母、数字、冒号、下划线和连字符'))
+        } else callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  name: [
+    {
+      validator: (_rule: unknown, value: string, callback: ValidationCallback) => {
+        if (!value.trim()) callback(new Error('请输入角色名称'))
+        else callback()
+      },
+      trigger: 'blur'
+    }
+  ],
+  permission_codes: [
+    {
+      type: 'array',
+      required: true,
+      min: 1,
+      message: '请至少选择一个权限点',
+      trigger: 'change'
     }
   ]
 }
@@ -255,6 +326,11 @@ async function clearResetPasswordValidation() {
   resetPasswordFormRef.value?.clearValidate()
 }
 
+async function clearRoleValidation() {
+  await nextTick()
+  roleFormRef.value?.clearValidate()
+}
+
 function clearUserDialogState() {
   userForm.password = ''
   editingUser.value = null
@@ -266,12 +342,29 @@ function clearResetPasswordDialogState() {
   resettingUser.value = null
 }
 
+function clearRoleDialogState() {
+  Object.assign(roleForm, defaultRoleForm())
+  editingRole.value = null
+}
+
+function permissionCodes(role: AdminRole): string[] {
+  return role.permissions.map((permission) => permission.code)
+}
+
 function openCreateDialog() {
   userDialogMode.value = 'create'
   editingUser.value = null
   Object.assign(userForm, defaultUserForm())
   userDialogOpen.value = true
   void clearUserValidation()
+}
+
+function openCreateRoleDialog() {
+  roleDialogMode.value = 'create'
+  editingRole.value = null
+  Object.assign(roleForm, defaultRoleForm())
+  roleDialogOpen.value = true
+  void clearRoleValidation()
 }
 
 function openEditDialog(user: AdminUser) {
@@ -286,6 +379,21 @@ function openEditDialog(user: AdminUser) {
   })
   userDialogOpen.value = true
   void clearUserValidation()
+}
+
+function openEditRoleDialog(role: AdminRole) {
+  if (role.is_system) return
+  roleDialogMode.value = 'edit'
+  editingRole.value = role
+  Object.assign(roleForm, {
+    code: role.code,
+    name: role.name,
+    description: role.description,
+    permission_codes: permissionCodes(role),
+    is_active: role.is_active
+  })
+  roleDialogOpen.value = true
+  void clearRoleValidation()
 }
 
 async function saveUser() {
@@ -314,6 +422,55 @@ async function saveUser() {
 
     userDialogOpen.value = false
     clearUserDialogState()
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  }
+}
+
+async function toggleRoleActive(role: AdminRole) {
+  if (role.is_system) return
+
+  try {
+    await adminUsers.updateRole(role.id, {
+      name: role.name,
+      description: role.description,
+      permission_codes: permissionCodes(role),
+      is_active: !role.is_active
+    })
+    ElMessage.success(role.is_active ? '角色已停用' : '角色已启用')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  }
+}
+
+async function saveRole() {
+  const valid = await validateForm(roleFormRef.value)
+  if (!valid) return
+
+  try {
+    if (isRoleCreateMode.value) {
+      const payload: AdminRoleCreateRequest = {
+        code: roleForm.code.trim(),
+        name: roleForm.name.trim(),
+        description: roleForm.description.trim(),
+        permission_codes: [...roleForm.permission_codes],
+        is_active: roleForm.is_active
+      }
+      await adminUsers.createRole(payload)
+      ElMessage.success('角色已创建')
+    } else if (editingRole.value) {
+      const payload: AdminRoleUpdateRequest = {
+        name: roleForm.name.trim(),
+        description: roleForm.description.trim(),
+        permission_codes: [...roleForm.permission_codes],
+        is_active: roleForm.is_active
+      }
+      await adminUsers.updateRole(editingRole.value.id, payload)
+      ElMessage.success('角色已更新')
+    }
+
+    roleDialogOpen.value = false
+    clearRoleDialogState()
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
   }
@@ -358,117 +515,185 @@ async function saveResetPassword() {
         <h1 class="page-title">用户管理</h1>
         <p class="page-subtitle">集中维护后台账号、角色分配、启停状态和密码重置。</p>
       </div>
-      <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建用户</el-button>
+      <el-button v-if="activeAdminTab === 'personnel'" type="primary" :icon="Plus" @click="openCreateDialog">
+        新建用户
+      </el-button>
+      <el-button v-else type="primary" :icon="Plus" @click="openCreateRoleDialog">新建角色</el-button>
     </div>
 
-    <div class="toolbar-panel">
-      <el-input
-        v-model="searchDraft"
-        class="search-input"
-        :prefix-icon="Search"
-        placeholder="搜索用户名或显示名称"
-        clearable
-        @keyup.enter="loadUsers"
-        @clear="clearSearch"
-      />
+    <el-tabs v-model="activeAdminTab" class="admin-tabs">
+      <el-tab-pane label="人员管理" name="personnel">
+        <div class="tab-panel">
+          <div class="toolbar-panel">
+            <el-input
+              v-model="searchDraft"
+              class="search-input"
+              :prefix-icon="Search"
+              placeholder="搜索用户名或显示名称"
+              clearable
+              @keyup.enter="loadUsers"
+              @clear="clearSearch"
+            />
 
-      <div class="filter-actions">
-        <el-select v-model="roleValue" class="filter-select" placeholder="角色">
-          <el-option label="全部角色" value="" />
-          <el-option v-for="role in roles" :key="role.code" :label="role.name" :value="role.code" />
-        </el-select>
-        <el-select v-model="activeValue" class="filter-select" placeholder="状态">
-          <el-option label="全部状态" value="" />
-          <el-option label="启用" value="active" />
-          <el-option label="停用" value="inactive" />
-        </el-select>
-        <el-button :icon="Refresh" @click="resetFilters">重置</el-button>
-      </div>
-    </div>
-
-    <div class="table-panel">
-      <el-table v-loading="loading" :data="users" row-key="id" empty-text="暂无用户">
-        <el-table-column prop="username" label="用户名" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="display_name" label="显示名称" min-width="150" show-overflow-tooltip />
-        <el-table-column label="角色" min-width="200">
-          <template #default="{ row }">
-            <div class="tag-list">
-              <el-tag
-                v-for="roleCode in row.roles"
-                :key="roleCode"
-                size="small"
-                effect="plain"
-                class="role-tag"
-              >
-                {{ roleName(roleCode) }}
-              </el-tag>
-              <span v-if="!row.roles.length" class="muted-text">-</span>
+            <div class="filter-actions">
+              <el-select v-model="roleValue" class="filter-select" placeholder="角色">
+                <el-option label="全部角色" value="" />
+                <el-option v-for="role in roles" :key="role.code" :label="role.name" :value="role.code" />
+              </el-select>
+              <el-select v-model="activeValue" class="filter-select" placeholder="状态">
+                <el-option label="全部状态" value="" />
+                <el-option label="启用" value="active" />
+                <el-option label="停用" value="inactive" />
+              </el-select>
+              <el-button :icon="Refresh" @click="resetFilters">重置</el-button>
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="activeTagType(row.is_active)" effect="plain">
-              {{ row.is_active ? '启用' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="更新时间" width="180">
-          <template #default="{ row }">{{ formatDateTime(row.updated_at) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
-          <template #default="{ row }">
-            <div class="row-actions">
-              <el-button link type="primary" :icon="Edit" @click="openEditDialog(row)">编辑</el-button>
-              <el-button link type="primary" :icon="Key" @click="openResetPasswordDialog(row)">
-                重置密码
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+          </div>
 
-    <div class="pagination-row">
-      <el-pagination
-        background
-        layout="total, sizes, prev, pager, next"
-        :total="total"
-        :current-page="page"
-        :page-size="pageSize"
-        :page-sizes="[20, 40, 80]"
-        @current-change="changePage"
-        @size-change="changePageSize"
-      />
-    </div>
+          <div class="table-panel">
+            <el-table v-loading="loading" :data="users" row-key="id" empty-text="暂无用户">
+              <el-table-column prop="username" label="用户名" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="display_name" label="显示名称" min-width="150" show-overflow-tooltip />
+              <el-table-column label="角色" min-width="200">
+                <template #default="{ row }">
+                  <div class="tag-list">
+                    <el-tag
+                      v-for="roleCode in row.roles"
+                      :key="roleCode"
+                      size="small"
+                      effect="plain"
+                      class="role-tag"
+                    >
+                      {{ roleName(roleCode) }}
+                    </el-tag>
+                    <span v-if="!row.roles.length" class="muted-text">-</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="activeTagType(row.is_active)" effect="plain">
+                    {{ row.is_active ? '启用' : '停用' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="更新时间" width="180">
+                <template #default="{ row }">{{ formatDateTime(row.updated_at) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="190" fixed="right">
+                <template #default="{ row }">
+                  <div class="row-actions">
+                    <el-button link type="primary" :icon="Edit" @click="openEditDialog(row)">编辑</el-button>
+                    <el-button link type="primary" :icon="Key" @click="openResetPasswordDialog(row)">
+                      重置密码
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
 
-    <div class="roles-panel">
-      <div class="panel-heading">
-        <h2>系统角色参考</h2>
-        <p>查看系统内置角色和权限编码，便于分配账号职责。</p>
-      </div>
-      <el-table :data="systemRoles" row-key="id" size="small" empty-text="暂无系统角色">
-        <el-table-column prop="name" label="名称" min-width="130" />
-        <el-table-column prop="code" label="编码" min-width="130" show-overflow-tooltip />
-        <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
-        <el-table-column label="权限编码" min-width="280">
-          <template #default="{ row: role }">
-            <div class="tag-list">
-              <el-tag
-                v-for="permission in role.permissions"
-                :key="permission.code"
-                size="small"
-                effect="plain"
-                type="info"
-              >
-                {{ permission.code }}
-              </el-tag>
-              <span v-if="!role.permissions.length" class="muted-text">-</span>
+          <div class="pagination-row">
+            <el-pagination
+              background
+              layout="total, sizes, prev, pager, next"
+              :total="total"
+              :current-page="page"
+              :page-size="pageSize"
+              :page-sizes="[20, 40, 80]"
+              @current-change="changePage"
+              @size-change="changePageSize"
+            />
+          </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="角色管理" name="roles">
+        <div class="tab-panel role-management">
+          <div class="roles-panel">
+            <div class="panel-heading">
+              <h2>系统角色</h2>
+              <p>系统内置角色只读，可用于人员分配，不能编辑或启停。</p>
             </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
+            <el-table :data="systemRoles" row-key="id" size="small" empty-text="暂无系统角色">
+              <el-table-column prop="name" label="名称" min-width="130" />
+              <el-table-column prop="code" label="编码" min-width="130" show-overflow-tooltip />
+              <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
+              <el-table-column label="权限编码" min-width="280">
+                <template #default="{ row: role }">
+                  <div class="tag-list">
+                    <el-tag
+                      v-for="permission in role.permissions"
+                      :key="permission.code"
+                      size="small"
+                      effect="plain"
+                      type="info"
+                    >
+                      {{ permission.code }}
+                    </el-tag>
+                    <span v-if="!role.permissions.length" class="muted-text">-</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="90" fixed="right">
+                <template #default="{ row }">
+                  <el-tag v-if="row.is_system" type="info" effect="plain">只读</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <div class="roles-panel">
+            <div class="panel-heading">
+              <h2>自定义角色</h2>
+              <p>维护可分配给后台人员的业务角色和权限点。</p>
+            </div>
+            <el-table :data="customRoles" row-key="id" size="small" empty-text="暂无自定义角色">
+              <el-table-column prop="name" label="名称" min-width="130" />
+              <el-table-column prop="code" label="编码" min-width="150" show-overflow-tooltip />
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="activeTagType(row.is_active)" effect="plain">
+                    {{ row.is_active ? '启用' : '停用' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
+              <el-table-column label="权限编码" min-width="280">
+                <template #default="{ row: role }">
+                  <div class="tag-list">
+                    <el-tag
+                      v-for="permission in role.permissions"
+                      :key="permission.code"
+                      size="small"
+                      effect="plain"
+                      type="info"
+                    >
+                      {{ permission.code }}
+                    </el-tag>
+                    <span v-if="!role.permissions.length" class="muted-text">-</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="170" fixed="right">
+                <template #default="{ row }">
+                  <div class="row-actions">
+                    <el-button link type="primary" :icon="Edit" @click="openEditRoleDialog(row)">编辑</el-button>
+                    <el-button
+                      link
+                      :type="row.is_active ? 'warning' : 'success'"
+                      :icon="row.is_active ? Refresh : Check"
+                      @click="toggleRoleActive(row)"
+                    >
+                      {{ row.is_active ? '停用' : '启用' }}
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog
       v-model="userDialogOpen"
@@ -522,7 +747,7 @@ async function saveResetPassword() {
         <el-form-item label="角色" prop="role_codes">
           <el-checkbox-group v-model="userForm.role_codes" class="role-checkboxes">
             <el-checkbox
-              v-for="role in roles"
+              v-for="role in assignableRoles"
               :key="role.code"
               :value="role.code"
               class="role-checkbox"
@@ -583,6 +808,67 @@ async function saveResetPassword() {
         <el-button type="primary" :loading="saving" @click="saveResetPassword">重置密码</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="roleDialogOpen"
+      :title="roleDialogTitle"
+      width="min(720px, 96vw)"
+      destroy-on-close
+      @closed="clearRoleDialogState"
+    >
+      <el-form
+        ref="roleFormRef"
+        :model="roleForm"
+        :rules="roleRules"
+        label-position="top"
+        class="dialog-form"
+        @submit.prevent
+      >
+        <div class="form-grid">
+          <el-form-item label="角色编码" prop="code">
+            <el-input
+              v-model="roleForm.code"
+              maxlength="80"
+              :disabled="!isRoleCreateMode"
+              autocomplete="off"
+              placeholder="custom:operator"
+            />
+          </el-form-item>
+
+          <el-form-item label="角色名称" prop="name">
+            <el-input v-model="roleForm.name" maxlength="80" autocomplete="off" />
+          </el-form-item>
+
+          <el-form-item label="说明" prop="description">
+            <el-input v-model="roleForm.description" maxlength="240" autocomplete="off" />
+          </el-form-item>
+
+          <el-form-item label="启用状态">
+            <el-switch v-model="roleForm.is_active" active-text="启用" inactive-text="停用" />
+          </el-form-item>
+        </div>
+
+        <el-form-item label="权限点" prop="permission_codes">
+          <el-checkbox-group v-model="roleForm.permission_codes" class="permission-checkboxes">
+            <el-checkbox
+              v-for="permission in allPermissions"
+              :key="permission.code"
+              :value="permission.code"
+              class="permission-checkbox"
+            >
+              <span>{{ permission.name }}</span>
+              <small>{{ permission.code }}</small>
+              <em>{{ permission.description }}</em>
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="roleDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveRole">保存</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -598,6 +884,17 @@ async function saveResetPassword() {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.admin-tabs {
+  min-width: 0;
+}
+
+.tab-panel,
+.role-management {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
 }
 
 .toolbar-panel,
@@ -730,6 +1027,43 @@ async function saveResetPassword() {
   font-size: 12px;
 }
 
+.permission-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.permission-checkbox {
+  align-items: flex-start;
+  height: auto;
+  min-height: 72px;
+  margin-right: 0;
+  padding: 8px 10px;
+  border: 1px solid #e2e8df;
+  border-radius: 8px;
+}
+
+.permission-checkbox :deep(.el-checkbox__label) {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  white-space: normal;
+}
+
+.permission-checkbox small {
+  color: #607068;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.permission-checkbox em {
+  color: #7b857f;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
 .dialog-context {
   margin: 0 0 12px;
   color: #536159;
@@ -757,6 +1091,7 @@ async function saveResetPassword() {
   }
 
   .form-grid,
+  .permission-checkboxes,
   .role-checkboxes {
     grid-template-columns: 1fr;
   }
