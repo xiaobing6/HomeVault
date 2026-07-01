@@ -235,6 +235,12 @@ class DictionaryOptionCreate(BaseModel):
     sort_order: int = 0
 
 
+class DictionaryOptionUpdate(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    sort_order: int = 0
+    is_active: bool = True
+
+
 class ConfigBootstrapResponse(BaseModel):
     home_space: HomeSpaceResponse
     residences: list[ResidenceResponse]

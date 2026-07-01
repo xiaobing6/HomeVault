@@ -18,6 +18,7 @@ from app.schemas.configuration import (
     DictionaryGroupResponse,
     DictionaryOptionCreate,
     DictionaryOptionResponse,
+    DictionaryOptionUpdate,
     FamilyMemberCreate,
     FamilyMemberResponse,
     FamilyMemberUpdate,
@@ -53,6 +54,7 @@ from app.services.configuration import (
     update_attribute_definition as update_attribute_definition_record,
     update_attribute_option as update_attribute_option_record,
     update_category as update_category_record,
+    update_dictionary_option as update_dictionary_option_record,
     update_family_member as update_family_member_record,
     update_home_space as update_home_space_record,
     update_item_status as update_item_status_record,
@@ -293,3 +295,13 @@ def create_dictionary_option(
     user: User = Depends(require_permission("config:manage")),
 ) -> DictionaryOptionResponse:
     return create_dictionary_option_record(db, payload)
+
+
+@router.patch("/dictionary-options/{option_id}", response_model=DictionaryOptionResponse)
+def update_dictionary_option(
+    option_id: int,
+    payload: DictionaryOptionUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("config:manage")),
+) -> DictionaryOptionResponse:
+    return update_dictionary_option_record(db, option_id, payload, actor=user)

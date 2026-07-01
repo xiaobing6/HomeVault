@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.configuration import (
     AttributeDefinition,
@@ -55,7 +55,38 @@ def test_core_configuration_seed_is_idempotent(db_session: Session) -> None:
         "lost",
         "consumed",
     }
-    assert {"units", "importance", "storage_conditions"}.issubset({group.code for group in groups})
+    assert {"units", "importance", "location_node_types"}.issubset({group.code for group in groups})
+    assert "storage_conditions" not in {group.code for group in groups}
+
+
+def test_core_configuration_seed_creates_dictionary_options_and_removes_storage_conditions(
+    db_session: Session,
+) -> None:
+    ensure_core_configuration_seed(db_session)
+
+    groups = db_session.scalars(
+        select(DictionaryGroup)
+        .options(selectinload(DictionaryGroup.options))
+        .order_by(DictionaryGroup.code)
+    ).all()
+    groups_by_code = {group.code: group for group in groups}
+
+    assert "storage_conditions" not in groups_by_code
+    assert {"units", "importance", "location_node_types"}.issubset(groups_by_code)
+    assert [(option.value, option.label, option.sort_order) for option in groups_by_code["importance"].options] == [
+        ("high", "\u9ad8", 10),
+        ("medium", "\u4e2d", 20),
+        ("low", "\u4f4e", 30),
+    ]
+    assert [option.value for option in groups_by_code["location_node_types"].options] == [
+        "room",
+        "area",
+        "cabinet",
+        "shelf",
+        "box",
+        "other",
+    ]
+    assert groups_by_code["units"].options[0].value == "\u4ef6"
 
 
 def test_core_configuration_seed_reuses_renamed_active_home_space(db_session: Session) -> None:

@@ -10,7 +10,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import AuditLog
 from app.models.auth import Role, User
-from app.models.configuration import AttributeDefinition, AttributeOption
+from app.models.configuration import AttributeDefinition, AttributeOption, DictionaryGroup
 from app.services.seed import seed_auth_baseline
 
 
@@ -327,7 +327,7 @@ def test_dictionaries_alias_returns_seeded_groups(client: TestClient) -> None:
     response = client.get("/api/config/dictionaries", headers=login(client))
 
     assert response.status_code == 200
-    assert {"units", "importance", "storage_conditions"}.issubset(
+    assert {"units", "importance", "location_node_types"}.issubset(
         {group["code"] for group in response.json()}
     )
 
@@ -482,6 +482,59 @@ def test_admin_can_use_backend_configuration_write_contract_routes(client: TestC
     )
     assert dictionary_option.status_code == 201
     assert dictionary_option.json()["value"] == "red"
+
+
+def test_admin_updates_existing_dictionary_option_and_writes_audit_log(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    assert bootstrap.status_code == 200
+    importance = next(group for group in bootstrap.json()["dictionary_groups"] if group["code"] == "importance")
+    option = next(item for item in importance["options"] if item["value"] == "high")
+
+    response = client.patch(
+        f"/api/config/dictionary-options/{option['id']}",
+        headers=headers,
+        json={"label": "High value", "sort_order": 5, "is_active": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["value"] == "high"
+    assert response.json()["label"] == "High value"
+    assert response.json()["sort_order"] == 5
+    assert response.json()["is_active"] is False
+
+    log = db_session.scalar(select(AuditLog).where(AuditLog.action == "config.dictionary_option.update"))
+    assert log is not None
+    assert log.actor_username == "admin"
+    assert log.resource_type == "dictionary_option"
+    assert log.resource_id == str(option["id"])
+    assert log.resource_label == "high"
+    assert log.metadata_json == {
+        "group_code": "importance",
+        "changed_fields": ["label", "sort_order", "is_active"],
+        "is_active": False,
+    }
+
+
+def test_dictionary_option_value_and_group_are_not_editable(client: TestClient) -> None:
+    headers = login(client)
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    assert bootstrap.status_code == 200
+    importance = next(group for group in bootstrap.json()["dictionary_groups"] if group["code"] == "importance")
+    option = next(item for item in importance["options"] if item["value"] == "medium")
+
+    response = client.patch(
+        f"/api/config/dictionary-options/{option['id']}",
+        headers=headers,
+        json={"label": "\u4e2d", "value": "changed", "group_id": 999, "sort_order": 20, "is_active": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["value"] == "medium"
+    assert response.json()["group_id"] == option["group_id"]
 
 
 def test_viewer_cannot_create_configuration(client: TestClient, db_session: Session) -> None:

@@ -35,6 +35,7 @@ from app.schemas.configuration import (
     DictionaryGroupResponse,
     DictionaryOptionCreate,
     DictionaryOptionResponse,
+    DictionaryOptionUpdate,
     FamilyMemberCreate,
     FamilyMemberResponse,
     FamilyMemberUpdate,
@@ -66,12 +67,40 @@ CORE_ITEM_STATUSES = [
 ]
 
 CORE_DICTIONARY_GROUPS = [
-    ("units", "单位"),
-    ("importance", "重要程度"),
-    ("storage_conditions", "存放条件"),
+    (
+        "units",
+        "\u5355\u4f4d",
+        [
+            ("\u4ef6", "\u4ef6", 10),
+            ("\u4e2a", "\u4e2a", 20),
+            ("\u7bb1", "\u7bb1", 30),
+            ("\u5957", "\u5957", 40),
+        ],
+    ),
+    (
+        "importance",
+        "\u91cd\u8981\u7a0b\u5ea6",
+        [
+            ("high", "\u9ad8", 10),
+            ("medium", "\u4e2d", 20),
+            ("low", "\u4f4e", 30),
+        ],
+    ),
+    (
+        "location_node_types",
+        "\u4f4d\u7f6e\u7c7b\u578b",
+        [
+            ("room", "\u623f\u95f4", 10),
+            ("area", "\u533a\u57df", 20),
+            ("cabinet", "\u67dc\u5b50", 30),
+            ("shelf", "\u67b6\u5b50", 40),
+            ("box", "\u7bb1/\u76d2", 50),
+            ("other", "\u5176\u4ed6", 60),
+        ],
+    ),
 ]
 
-ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE = "启用住宅名称已存在"
+ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE = "\u542f\u7528\u4f4f\u5b85\u540d\u79f0\u5df2\u5b58\u5728"
 
 
 def commit_or_bad_request(db: Session, message: str) -> None:
@@ -114,10 +143,41 @@ def ensure_core_configuration_seed(db: Session) -> CoreConfigurationSeedResult:
                 )
             )
 
-    for code, name in CORE_DICTIONARY_GROUPS:
+    storage_group = db.scalar(
+        select(DictionaryGroup).where(
+            DictionaryGroup.code == "storage_conditions",
+            DictionaryGroup.is_system.is_(True),
+        )
+    )
+    if storage_group is not None:
+        db.delete(storage_group)
+
+    for code, name, options in CORE_DICTIONARY_GROUPS:
         group = db.scalar(select(DictionaryGroup).where(DictionaryGroup.code == code))
         if group is None:
-            db.add(DictionaryGroup(code=code, name=name, is_system=True, is_active=True))
+            group = DictionaryGroup(code=code, name=name, is_system=True, is_active=True)
+            db.add(group)
+            db.flush()
+        else:
+            group.name = name
+            group.is_system = True
+            group.is_active = True
+
+        existing_options = {
+            option.value: option
+            for option in db.scalars(select(DictionaryOption).where(DictionaryOption.group_id == group.id)).all()
+        }
+        for value, label, sort_order in options:
+            if value not in existing_options:
+                db.add(
+                    DictionaryOption(
+                        group_id=group.id,
+                        label=label,
+                        value=value,
+                        sort_order=sort_order,
+                        is_active=True,
+                    )
+                )
 
     db.commit()
     db.refresh(home_space)
@@ -129,7 +189,7 @@ def ensure_core_configuration_seed(db: Session) -> CoreConfigurationSeedResult:
     ).all()
     dictionary_groups = db.scalars(
         select(DictionaryGroup)
-        .where(DictionaryGroup.code.in_([code for code, _name in CORE_DICTIONARY_GROUPS]))
+        .where(DictionaryGroup.code.in_([code for code, _name, _options in CORE_DICTIONARY_GROUPS]))
         .options(selectinload(DictionaryGroup.options))
         .order_by(DictionaryGroup.code)
     ).all()
@@ -831,5 +891,45 @@ def create_dictionary_option(
     )
     db.add(option)
     commit_or_bad_request(db, "Dictionary option value already exists")
+    db.refresh(option)
+    return DictionaryOptionResponse.model_validate(option)
+
+
+def update_dictionary_option(
+    db: Session,
+    option_id: int,
+    payload: DictionaryOptionUpdate,
+    actor: User | None = None,
+) -> DictionaryOptionResponse:
+    option = db.get(DictionaryOption, option_id)
+    if option is None:
+        raise bad_request("Dictionary option not found")
+
+    group = option.group
+    changed_fields: list[str] = []
+    if option.label != payload.label:
+        changed_fields.append("label")
+    if option.sort_order != payload.sort_order:
+        changed_fields.append("sort_order")
+    if option.is_active != payload.is_active:
+        changed_fields.append("is_active")
+
+    option.label = payload.label
+    option.sort_order = payload.sort_order
+    option.is_active = payload.is_active
+    record_audit_log(
+        db,
+        action="config.dictionary_option.update",
+        resource_type="dictionary_option",
+        actor=actor,
+        resource_id=option.id,
+        resource_label=option.value,
+        metadata={
+            "group_code": group.code if group is not None else None,
+            "changed_fields": changed_fields,
+            "is_active": option.is_active,
+        },
+    )
+    db.commit()
     db.refresh(option)
     return DictionaryOptionResponse.model_validate(option)
