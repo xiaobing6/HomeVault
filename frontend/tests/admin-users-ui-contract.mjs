@@ -65,7 +65,22 @@ assert.match(adminUsersPage, /角色管理/, 'Role tab should use Chinese label'
 
 assert.match(adminUsersPage, /const\s+assignableRoles\s*=\s*computed/, 'User role assignment should use computed assignable roles')
 assert.match(adminUsersPage, /role\.is_system\s*\|\|\s*role\.is_active/, 'Assignable roles should include system roles and active custom roles')
+assert.match(
+  adminUsersPage,
+  /const\s+selectedUserRoleCodes\s*=\s*computed\(\s*\(\)\s*=>\s*new\s+Set\(\s*userForm\.role_codes\s*\)\s*\)/,
+  'User role assignment should expose selected user role codes'
+)
+assert.match(
+  adminUsersPage,
+  /selectedUserRoleCodes\.value\.has\(\s*role\.code\s*\)/,
+  'Assignable roles should include roles already selected on the edited user'
+)
 assert.match(adminUsersPage, /v-for="role in assignableRoles"/, 'User role checkboxes should use assignable roles')
+assert.match(
+  adminUsersPage,
+  /v-if="!role\.is_active"[\s\S]*(已停用|停用|宸插仠鐢?|鍋滅敤)/,
+  'Inactive selected roles should be visibly identified in the role checkbox list'
+)
 
 assert.match(adminUsersPage, /const\s+systemRoles\s*=\s*computed/, 'Page should keep system roles as a computed group')
 assert.match(adminUsersPage, /const\s+customRoles\s*=\s*computed/, 'Page should keep custom roles as a computed group')
@@ -77,6 +92,11 @@ assert.match(adminUsersPage, /adminUsers\.updateRole/, 'Role update should call 
 assert.match(adminUsersPage, /roleForm\.permission_codes/, 'Role form should bind selected permission codes')
 assert.match(adminUsersPage, /permission\.description/, 'Role management should display permission descriptions')
 assert.match(adminUsersPage, /row\.is_system/, 'System roles should be treated as read-only in the UI')
+assert.match(
+  adminUsersPage,
+  /@click="toggleRoleActive\(row\)"[\s\S]*:(loading|disabled)="saving"|:(loading|disabled)="saving"[\s\S]*@click="toggleRoleActive\(row\)"/,
+  'Role active toggle should bind saving state to prevent duplicate requests'
+)
 assert.doesNotMatch(adminUsersPage, /deleteRole|removeRole|destroyRole/, 'Role UI should not expose role deletion')
 
 assert.match(adminUsersPage, /const\s+searchDraft\s*=\s*ref\(/, 'Toolbar search should keep local draft state')

@@ -105,7 +105,12 @@ const allPermissions = computed(() => {
 })
 const systemRoles = computed(() => roles.value.filter((role) => role.is_system))
 const customRoles = computed(() => roles.value.filter((role) => !role.is_system))
-const assignableRoles = computed(() => roles.value.filter((role) => role.is_system || role.is_active))
+const selectedUserRoleCodes = computed(() => new Set(userForm.role_codes))
+const assignableRoles = computed(() =>
+  roles.value.filter(
+    (role) => role.is_system || role.is_active || selectedUserRoleCodes.value.has(role.code)
+  )
+)
 
 const roleValue = computed({
   get: () => adminUsers.filters.role ?? '',
@@ -682,6 +687,8 @@ async function saveResetPassword() {
                       link
                       :type="row.is_active ? 'warning' : 'success'"
                       :icon="row.is_active ? Refresh : Check"
+                      :loading="saving"
+                      :disabled="saving"
                       @click="toggleRoleActive(row)"
                     >
                       {{ row.is_active ? '停用' : '启用' }}
@@ -754,6 +761,7 @@ async function saveResetPassword() {
             >
               <span>{{ role.name }}</span>
               <small>{{ role.code }}</small>
+              <el-tag v-if="!role.is_active" size="small" type="info" effect="plain">已停用</el-tag>
             </el-checkbox>
           </el-checkbox-group>
         </el-form-item>
