@@ -3,7 +3,7 @@
 Date: 2026-07-01
 Branch checked: `phase-1-foundation`
 
-This document records the current project closeout after Phase 4C-4. It is a status and handoff document only; it does not introduce new business behavior.
+This document records the current project closeout after Phase 4C-5. It is a status and handoff document only; it does not introduce new business behavior.
 
 ## Current Completion Status
 
@@ -52,19 +52,19 @@ Complete for the planned audit-log scope.
 
 ### Phase 4C: Management Enhancements
 
-Complete through 4C-4.
+Complete through 4C-5.
 
 - 4C-1: admin user management, system role visibility, role assignment, last-active-admin guard, and residence active-only uniqueness/editing.
 - 4C-2: configuration management polish for residences, locations, family members, categories, custom fields, attribute options, and item statuses.
 - 4C-3: inventory bulk operations and CSV export.
 - 4C-4: safe create-only inventory CSV import with template download, preview validation, one-time confirmation tokens, and frontend import dialog.
+- 4C-5: custom role management with read-only system permissions, read-only built-in roles, custom role create/edit/activate/deactivate, active-role assignment, and role mutation audit logging.
 
 ## Deliberately Deferred Work
 
 These are not current-phase defects. They are intentionally outside the implemented slices and should get their own spec/plan before implementation.
 
-- Custom role management: create/edit/deactivate non-system roles and assign permission sets.
-- Permission editing: keep system permission codes carefully controlled; do not make them ad hoc without a separate security design.
+- Permission-code editing remains deferred. Permission codes are still system-owned and are not administrator-created records.
 - Dictionary group and dictionary option editing: currently read-only by design. Item statuses are editable, but generic dictionary groups/options are not.
 - Import updates/merges: 4C-4 import is create-only. It does not update existing items, merge duplicates, import images, or import attachments.
 - QR code and scan workflows.
@@ -74,7 +74,7 @@ These are not current-phase defects. They are intentionally outside the implemen
 
 ## Current Risk Boundaries
 
-- Role model: `admin`, `editor`, and `viewer` remain system-defined. Users can be assigned roles, but roles themselves are not yet user-editable.
+- Role model: `admin`, `editor`, and `viewer` remain system-defined and read-only. Custom non-system roles can be created, edited, activated, and deactivated.
 - Permissions: permissions are seeded application capabilities, not administrator-created records.
 - Dictionary records: dictionary groups/options are exposed for reading and bootstrapping workflows; editing remains out of scope.
 - CSV import: preview tokens are in memory and time-limited, so previews do not survive backend restart. This is acceptable for the current local-first workflow.
@@ -85,11 +85,10 @@ These are not current-phase defects. They are intentionally outside the implemen
 
 Recommended order:
 
-1. Phase 4C-5 custom role management, conservative version: system permissions remain fixed; only custom non-system roles are editable.
-2. Dictionary group/option editing if the product needs configurable dictionaries beyond item statuses and attribute options.
-3. Import/export v2 for update/merge strategy and media handling.
-4. Browser-based E2E acceptance suite for login, configuration, inventory, reminders, audit logs, import, and bulk workflows.
-5. QR code, mobile, and external notification integrations.
+1. Dictionary group/option editing if the product needs configurable dictionaries beyond item statuses and attribute options.
+2. Import/export v2 for update/merge strategy and media handling.
+3. Browser-based E2E acceptance suite for login, configuration, inventory, reminders, audit logs, import, and bulk workflows.
+4. QR code, mobile, and external notification integrations.
 
 ## Verification Record
 
