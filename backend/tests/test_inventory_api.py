@@ -18,6 +18,7 @@ from app.api.deps import get_db
 from app.core.config import get_settings
 from app.core.security import hash_password
 from app.main import app
+from app.models import AuditLog
 from app.models.auth import Role, User
 from app.models.configuration import AttributeDefinition, Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
 from app.models.inventory import Item
@@ -1035,3 +1036,64 @@ def test_inventory_api_filters_items_by_reminders(client: TestClient, db_session
     assert upcoming.json()["total"] == 0
     assert pending.status_code == 200
     assert pending.json()["total"] == 1
+
+
+def test_item_importance_create_update_filter_and_audit(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    payload = make_item_payload(ids)
+    payload["importance"] = "high"
+
+    created = client.post("/api/items", headers=headers, json=payload)
+    assert created.status_code == 201
+    assert created.json()["importance"] == "high"
+    item_id = created.json()["id"]
+
+    listed = client.get("/api/items", headers=headers, params={"importance": "high"})
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["items"]] == [item_id]
+
+    updated = client.patch(
+        f"/api/items/{item_id}",
+        headers=headers,
+        json={"importance": "low"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["importance"] == "low"
+
+    audit_log = db_session.scalar(select(AuditLog).where(AuditLog.action == "item.importance.update"))
+    assert audit_log is not None
+    assert audit_log.actor_user_id is not None
+    assert audit_log.resource_type == "item"
+    assert audit_log.resource_id == str(item_id)
+    assert audit_log.metadata_json == {"previous_importance": "high", "new_importance": "low"}
+
+
+def test_item_importance_rejects_unknown_and_disabled_values(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    payload = make_item_payload(ids)
+    payload["importance"] = "urgent"
+
+    unknown = client.post("/api/items", headers=headers, json=payload)
+    assert unknown.status_code == 400
+
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    importance = next(group for group in bootstrap.json()["dictionary_groups"] if group["code"] == "importance")
+    high = next(option for option in importance["options"] if option["value"] == "high")
+    disabled = client.patch(
+        f"/api/config/dictionary-options/{high['id']}",
+        headers=headers,
+        json={"label": "\u9ad8", "sort_order": 10, "is_active": False},
+    )
+    assert disabled.status_code == 200
+
+    payload["importance"] = "high"
+    disabled_create = client.post("/api/items", headers=headers, json=payload)
+    assert disabled_create.status_code == 400

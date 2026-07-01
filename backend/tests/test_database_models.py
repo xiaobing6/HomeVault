@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.db.base import Base
-from app.models import AuthSession, AuditLog, ExternalIdentity, Permission, Role, User
+from app.models import AuthSession, AuditLog, Category, ExternalIdentity, Item, ItemStatus, Permission, Role, User
 
 
 EXPECTED_AUTH_TABLES = {
@@ -96,6 +96,22 @@ def _insert_residence(connection, home_space_id: int, name: str, is_active: bool
             "updated_at": now,
         },
     )
+
+
+def make_item(db_session: Session, name: str = "Item") -> Item:
+    category = Category(code=f"category-{name}", name=f"{name} category")
+    status = ItemStatus(code=f"status-{name}", name=f"{name} status", semantic="available")
+    db_session.add_all([category, status])
+    db_session.flush()
+    item = Item(
+        name=name,
+        category_id=category.id,
+        status_id=status.id,
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+    return item
 
 
 def test_auth_tables_are_registered() -> None:
@@ -452,3 +468,9 @@ def test_audit_log_migration_exists_and_round_trips(tmp_path: Path) -> None:
         assert "audit_logs" not in downgraded_tables
     finally:
         restore_alembic_database_url(cfg)
+
+
+def test_item_importance_defaults_to_medium(db_session: Session) -> None:
+    item = make_item(db_session, name="Importance default")
+
+    assert item.importance == "medium"

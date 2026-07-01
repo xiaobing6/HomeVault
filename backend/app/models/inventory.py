@@ -50,6 +50,7 @@ class Item(Base):
     )
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=1, nullable=False)
     unit: Mapped[str] = mapped_column(String(40), default="件", nullable=False)
+    importance: Mapped[str] = mapped_column(String(40), default="medium", nullable=False, index=True)
     owner_member_id: Mapped[int | None] = mapped_column(
         ForeignKey("family_members.id", ondelete="SET NULL"),
         nullable=True,

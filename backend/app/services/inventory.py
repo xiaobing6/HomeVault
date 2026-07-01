@@ -84,6 +84,8 @@ from app.services.privacy import (
     is_sensitive_privacy_level,
     normalize_privacy_level,
 )
+from app.services.audit import record_audit_log
+from app.services.dictionaries import require_active_dictionary_value
 
 try:
     from app.core.errors import not_found
@@ -97,6 +99,8 @@ MAX_CONTAINER_DEPTH = 5
 EXIT_STATUS_SEMANTICS = {"removed", "missing", "consumed", "retired", "lost", "disposed"}
 INITIAL_QUANTITY_REASON = "\u521d\u59cb\u6570\u91cf"
 REDACTED_VALUE = "******"
+IMPORTANCE_GROUP = "importance"
+IMPORTANCE_INVALID_MESSAGE = "\u91cd\u8981\u7a0b\u5ea6\u4e0d\u5408\u6cd5"
 
 
 @dataclass(frozen=True)
@@ -495,6 +499,12 @@ def create_item_record(
     assert_member_exists(db, payload.owner_member_id)
     assert_member_exists(db, payload.keeper_member_id)
     attribute_values = validate_attribute_values(db, category.id, payload.attribute_values)
+    importance = require_active_dictionary_value(
+        db,
+        IMPORTANCE_GROUP,
+        payload.importance,
+        message=IMPORTANCE_INVALID_MESSAGE,
+    )
 
     item = Item(
         name=name,
@@ -503,6 +513,7 @@ def create_item_record(
         status_id=item_status.id,
         quantity=payload.quantity,
         unit=payload.unit,
+        importance=importance,
         owner_member_id=payload.owner_member_id,
         keeper_member_id=payload.keeper_member_id,
         location_node_id=placement.location_node.id if placement.location_node is not None else None,
@@ -552,6 +563,7 @@ def update_item(
 ) -> ItemDetailResponse:
     item = require_item(db, item_id)
     fields = payload.model_fields_set
+    previous_importance = item.importance
     category_supplied = "category_id" in fields and payload.category_id is not None
     attributes_supplied = "attribute_values" in fields and payload.attribute_values is not None
     target_category_id = payload.category_id if category_supplied else item.category_id
@@ -585,6 +597,27 @@ def update_item(
         if unit == "":
             raise bad_request("\u5355\u4f4d\u4e0d\u80fd\u4e3a\u7a7a")
         item.unit = unit
+    if "importance" in fields and payload.importance is not None:
+        item.importance = require_active_dictionary_value(
+            db,
+            IMPORTANCE_GROUP,
+            payload.importance,
+            message=IMPORTANCE_INVALID_MESSAGE,
+            allow_existing_value=item.importance,
+        )
+        if item.importance != previous_importance:
+            record_audit_log(
+                db,
+                action="item.importance.update",
+                resource_type="item",
+                actor_user_id=actor_id,
+                resource_id=item.id,
+                resource_label=item.name,
+                metadata={
+                    "previous_importance": previous_importance,
+                    "new_importance": item.importance,
+                },
+            )
     if "owner_member_id" in fields:
         item.owner_member_id = payload.owner_member_id
     if "keeper_member_id" in fields:
@@ -1206,6 +1239,8 @@ def build_item_list_filter_statement(query: ItemListQuery):
         stmt = stmt.where(Item.category_id == query.category_id)
     if query.status_id is not None:
         stmt = stmt.where(Item.status_id == query.status_id)
+    if query.importance is not None:
+        stmt = stmt.where(Item.importance == query.importance)
     if query.container_item_id is not None:
         stmt = stmt.where(Item.container_item_id == query.container_item_id)
     if query.owner_member_id is not None:
@@ -1614,6 +1649,7 @@ def build_item_summary_response(item: Item, include_sensitive: bool = True) -> I
         status_semantic=item.status.semantic if item.status is not None else "",
         quantity=item.quantity,
         unit=item.unit,
+        importance=item.importance,
         owner_member_id=item.owner_member_id,
         owner_member_name=item.owner_member.name if item.owner_member is not None else None,
         keeper_member_id=item.keeper_member_id,

@@ -41,6 +41,7 @@ class ItemCreate(PlacementPayload):
     status_id: int
     quantity: Decimal = Decimal("1")
     unit: str = "件"
+    importance: str = Field(default="medium", max_length=40)
     owner_member_id: int | None = None
     keeper_member_id: int | None = None
     is_container: bool = False
@@ -54,6 +55,7 @@ class ItemUpdate(RequestModel):
     description: str | None = None
     category_id: int | None = None
     unit: str | None = None
+    importance: str | None = Field(default=None, max_length=40)
     owner_member_id: int | None = None
     keeper_member_id: int | None = None
     is_container: bool | None = None
@@ -69,6 +71,7 @@ class ItemListQuery(RequestModel):
     location_node_id: int | None = None
     container_item_id: int | None = None
     status_id: int | None = None
+    importance: str | None = None
     tag: str | None = None
     is_on_loan: bool | None = None
     include_archived: bool = False
@@ -111,6 +114,7 @@ class ItemSummaryResponse(ResponseModel):
     status_semantic: str
     quantity: Decimal
     unit: str
+    importance: str
     owner_member_id: int | None = None
     owner_member_name: str | None = None
     keeper_member_id: int | None = None
