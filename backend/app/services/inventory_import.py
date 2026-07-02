@@ -455,24 +455,40 @@ def parse_privacy_level(raw_value: str, errors: list[ImportFieldMessage]) -> str
 
 
 def parse_importance(db: Session, raw_value: str, errors: list[ImportFieldMessage]) -> str:
-    value = raw_value.strip()
-    if value == "":
-        return "medium"
-    option = db.scalar(
+    raw_value = raw_value.strip()
+    value = raw_value or "medium"
+    value_option = db.scalar(
         select(DictionaryOption)
         .join(DictionaryGroup)
         .where(
             DictionaryGroup.code == "importance",
             DictionaryGroup.is_active.is_(True),
             DictionaryOption.is_active.is_(True),
-            or_(DictionaryOption.value == value, DictionaryOption.label == value),
+            DictionaryOption.value == value,
         )
         .order_by(DictionaryOption.sort_order, DictionaryOption.id)
     )
-    if option is None:
+    if value_option is not None:
+        return value_option.value
+    if raw_value == "":
         errors.append(field_error("importance", "\u91cd\u8981\u7a0b\u5ea6\u4e0d\u6b63\u786e"))
         return "medium"
-    return option.value
+
+    label_options = db.scalars(
+        select(DictionaryOption)
+        .join(DictionaryGroup)
+        .where(
+            DictionaryGroup.code == "importance",
+            DictionaryGroup.is_active.is_(True),
+            DictionaryOption.is_active.is_(True),
+            DictionaryOption.label == value,
+        )
+        .order_by(DictionaryOption.sort_order, DictionaryOption.id)
+    ).all()
+    if len(label_options) == 1:
+        return label_options[0].value
+    errors.append(field_error("importance", "\u91cd\u8981\u7a0b\u5ea6\u4e0d\u6b63\u786e"))
+    return "medium"
 
 
 def parse_tags(raw_value: str) -> list[str]:

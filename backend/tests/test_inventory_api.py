@@ -20,7 +20,17 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import AuditLog
 from app.models.auth import Role, User
-from app.models.configuration import AttributeDefinition, Category, FamilyMember, HomeSpace, ItemStatus, LocationNode, Residence
+from app.models.configuration import (
+    AttributeDefinition,
+    Category,
+    DictionaryGroup,
+    DictionaryOption,
+    FamilyMember,
+    HomeSpace,
+    ItemStatus,
+    LocationNode,
+    Residence,
+)
 from app.models.inventory import Item
 from app.services import inventory_import
 from app.services.reminders import server_today
@@ -127,6 +137,16 @@ def csv_upload(content: str) -> dict[str, tuple[str, bytes, str]]:
 
 def csv_upload_bytes(content: bytes) -> dict[str, tuple[str, bytes, str]]:
     return {"file": ("items.csv", content, "text/csv")}
+
+
+def importance_option(db: Session, value: str) -> DictionaryOption:
+    option = db.scalar(
+        select(DictionaryOption)
+        .join(DictionaryGroup)
+        .where(DictionaryGroup.code == "importance", DictionaryOption.value == value)
+    )
+    assert option is not None
+    return option
 
 
 def test_admin_can_create_list_detail_update_and_archive_item(client: TestClient, db_session: Session) -> None:
@@ -500,9 +520,8 @@ def test_inventory_export_outputs_importance_label(
     response = client.post("/api/items/export.csv", headers=headers, json={"item_ids": [created.json()["id"]]})
 
     assert response.status_code == 200
-    assert "importance" in response.text.splitlines()[0].split(",")
-    assert "high" not in response.text.splitlines()[1]
-    assert "\u9ad8" in response.text.splitlines()[1]
+    rows = list(csv.DictReader(StringIO(response.text)))
+    assert rows[0]["importance"] == "\u9ad8"
 
 
 def test_inventory_import_accepts_importance_value_and_label(
@@ -528,6 +547,79 @@ def test_inventory_import_accepts_importance_value_and_label(
     assert body["invalid_count"] == 0
     assert body["rows"][0]["normalized"]["importance"] == "high"
     assert body["rows"][1]["normalized"]["importance"] == "low"
+
+
+def test_inventory_import_importance_value_wins_over_label_collision(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    high = importance_option(db_session, "high")
+    high.label = "medium"
+    db_session.commit()
+    csv_content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,importance,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Medium item,From CSV,documents,in_stock,1,pcs,medium,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(csv_content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["invalid_count"] == 0
+    assert body["rows"][0]["normalized"]["importance"] == "medium"
+
+
+def test_inventory_import_rejects_ambiguous_importance_label(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    high = importance_option(db_session, "high")
+    low = importance_option(db_session, "low")
+    high.label = "shared"
+    low.label = "shared"
+    db_session.commit()
+    csv_content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,importance,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Shared item,From CSV,documents,in_stock,1,pcs,shared,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(csv_content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["invalid_count"] == 1
+    assert body["rows"][0]["is_valid"] is False
+    assert {error["field"] for error in body["rows"][0]["errors"]} == {"importance"}
+
+
+def test_inventory_import_rejects_blank_importance_when_medium_disabled(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    medium = importance_option(db_session, "medium")
+    medium.is_active = False
+    db_session.commit()
+    csv_content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,importance,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "Blank item,From CSV,documents,in_stock,1,pcs,,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post("/api/items/import/preview", headers=headers, files=csv_upload(csv_content))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["invalid_count"] == 1
+    assert body["rows"][0]["is_valid"] is False
+    assert {error["field"] for error in body["rows"][0]["errors"]} == {"importance"}
 
 
 def test_inventory_import_preview_reports_row_errors(client: TestClient) -> None:
