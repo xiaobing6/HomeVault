@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { Box, Collection, Location, User } from '@element-plus/icons-vue'
+import { storeToRefs } from 'pinia'
+import { Box, Collection, Location, Star, User } from '@element-plus/icons-vue'
 
 import type { ItemSummary } from '../../api/inventory'
+import { useConfigurationStore } from '../../stores/configuration'
+import { dictionaryLabel } from '../../utils/dictionaries'
 import ProtectedImage from './ProtectedImage.vue'
 
 defineProps<{
@@ -11,6 +14,13 @@ defineProps<{
 const emit = defineEmits<{
   'open-detail': [itemId: number]
 }>()
+
+const configuration = useConfigurationStore()
+const { data } = storeToRefs(configuration)
+
+function importanceLabel(value: string) {
+  return dictionaryLabel(data.value, 'importance', value)
+}
 </script>
 
 <template>
@@ -49,6 +59,10 @@ const emit = defineEmits<{
           <span>{{ item.category_name || '未分类' }}</span>
         </div>
         <div class="meta-line">
+          <el-icon><Star /></el-icon>
+          <span>重要程度：{{ importanceLabel(item.importance) }}</span>
+        </div>
+        <div class="meta-line">
           <el-icon><Location /></el-icon>
           <span>{{ item.location_node_name || item.residence_name || '未设置位置' }}</span>
         </div>
@@ -78,7 +92,7 @@ const emit = defineEmits<{
   grid-template-columns: 84px minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
-  min-height: 148px;
+  min-height: 168px;
   padding: 12px;
   color: inherit;
   text-align: left;

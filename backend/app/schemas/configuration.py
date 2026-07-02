@@ -205,11 +205,6 @@ class ItemStatusResponse(ItemStatusUpdate):
     is_system: bool
 
 
-class DictionaryGroupCreate(BaseModel):
-    code: str = Field(min_length=1, max_length=80)
-    name: str = Field(min_length=1, max_length=120)
-
-
 class DictionaryOptionResponse(ResponseModel):
     id: int
     group_id: int
@@ -226,13 +221,6 @@ class DictionaryGroupResponse(ResponseModel):
     is_system: bool
     is_active: bool
     options: list[DictionaryOptionResponse] = Field(default_factory=list)
-
-
-class DictionaryOptionCreate(BaseModel):
-    group_id: int
-    label: str = Field(min_length=1, max_length=120)
-    value: str = Field(min_length=1, max_length=120)
-    sort_order: int = 0
 
 
 class DictionaryOptionUpdate(BaseModel):

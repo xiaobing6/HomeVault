@@ -69,6 +69,21 @@ def test_configuration_mutations_write_audit_logs(
     assert location.status_code == 201
     location_id = location.json()["id"]
 
+    location_update = client.patch(
+        f"/api/config/location-nodes/{location_id}",
+        headers=headers,
+        json={
+            "parent_id": None,
+            "name": "Shelf Updated",
+            "node_type": "cabinet",
+            "icon": "",
+            "sort_order": 2,
+            "note": "",
+            "is_active": False,
+        },
+    )
+    assert location_update.status_code == 200
+
     audit_logs = db_session.scalars(
         select(AuditLog)
         .where(AuditLog.action.like("config.%"))
@@ -80,6 +95,7 @@ def test_configuration_mutations_write_audit_logs(
         "config.residence.create",
         "config.residence.update",
         "config.location.create",
+        "config.location.update",
     }
     assert {log.actor_username for log in audit_logs} == {"admin"}
 
@@ -100,6 +116,16 @@ def test_configuration_mutations_write_audit_logs(
     assert location_create_log.resource_id == str(location_id)
     assert location_create_log.resource_label == "Shelf"
     assert location_create_log.metadata_json == {"residence_id": residence_id}
+
+    location_update_log = audit_logs_by_action["config.location.update"]
+    assert location_update_log.resource_type == "location_node"
+    assert location_update_log.resource_id == str(location_id)
+    assert location_update_log.resource_label == "Shelf Updated"
+    assert location_update_log.metadata_json == {
+        "residence_id": residence_id,
+        "changed_fields": ["name", "node_type", "sort_order", "is_active"],
+        "is_active": False,
+    }
 
 
 def test_bootstrap_returns_seeded_core_config(client: TestClient) -> None:
@@ -469,19 +495,26 @@ def test_admin_can_use_backend_configuration_write_contract_routes(client: TestC
     assert status_update.status_code == 200
     assert status_update.json()["name"] == "Reserved now"
 
+
+def test_dictionary_groups_and_options_cannot_be_created(client: TestClient) -> None:
+    headers = login(client)
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+    assert bootstrap.status_code == 200
+    importance = next(group for group in bootstrap.json()["dictionary_groups"] if group["code"] == "importance")
+
     dictionary_group = client.post(
         "/api/config/dictionary-groups",
         headers=headers,
         json={"code": "colors", "name": "Colors"},
     )
-    assert dictionary_group.status_code == 201
+    assert dictionary_group.status_code in {404, 405}
+
     dictionary_option = client.post(
         "/api/config/dictionary-options",
         headers=headers,
-        json={"group_id": dictionary_group.json()["id"], "label": "Red", "value": "red", "sort_order": 10},
+        json={"group_id": importance["id"], "label": "Red", "value": "red", "sort_order": 10},
     )
-    assert dictionary_option.status_code == 201
-    assert dictionary_option.json()["value"] == "red"
+    assert dictionary_option.status_code in {404, 405}
 
 
 def test_admin_updates_existing_dictionary_option_and_writes_audit_log(

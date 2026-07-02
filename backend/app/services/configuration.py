@@ -31,9 +31,7 @@ from app.schemas.configuration import (
     CategoryResponse,
     CategoryUpdate,
     ConfigBootstrapResponse,
-    DictionaryGroupCreate,
     DictionaryGroupResponse,
-    DictionaryOptionCreate,
     DictionaryOptionResponse,
     DictionaryOptionUpdate,
     FamilyMemberCreate,
@@ -713,6 +711,22 @@ def update_location_node(
         message=LOCATION_NODE_TYPE_INVALID_MESSAGE,
         allow_existing_value=node.node_type,
     )
+    changed_fields: list[str] = []
+    if node.parent_id != payload.parent_id:
+        changed_fields.append("parent_id")
+    if node.name != payload.name:
+        changed_fields.append("name")
+    if node.node_type != node_type:
+        changed_fields.append("node_type")
+    if node.icon != payload.icon:
+        changed_fields.append("icon")
+    if node.sort_order != payload.sort_order:
+        changed_fields.append("sort_order")
+    if node.note != payload.note:
+        changed_fields.append("note")
+    if node.is_active != payload.is_active:
+        changed_fields.append("is_active")
+
     node.parent_id = payload.parent_id
     node.name = payload.name
     node.node_type = node_type
@@ -720,6 +734,19 @@ def update_location_node(
     node.sort_order = payload.sort_order
     node.note = payload.note
     node.is_active = payload.is_active
+    record_audit_log(
+        db,
+        action="config.location.update",
+        resource_type="location_node",
+        actor=actor,
+        resource_id=node.id,
+        resource_label=node.name,
+        metadata={
+            "residence_id": node.residence_id,
+            "changed_fields": changed_fields,
+            "is_active": node.is_active,
+        },
+    )
     db.commit()
     db.refresh(node)
     return LocationNodeResponse.model_validate(node)
@@ -860,56 +887,6 @@ def update_item_status(db: Session, status_id: int, payload: ItemStatusUpdate) -
     db.commit()
     db.refresh(item_status)
     return ItemStatusResponse.model_validate(item_status)
-
-
-def create_dictionary_group(
-    db: Session,
-    payload: DictionaryGroupCreate,
-) -> DictionaryGroupResponse:
-    existing = db.scalar(select(DictionaryGroup).where(DictionaryGroup.code == payload.code))
-    if existing is not None:
-        raise bad_request("Dictionary group code already exists")
-
-    group = DictionaryGroup(
-        code=payload.code,
-        name=payload.name,
-        is_system=False,
-        is_active=True,
-    )
-    db.add(group)
-    commit_or_bad_request(db, "Dictionary group code already exists")
-    db.refresh(group)
-    return DictionaryGroupResponse.model_validate(group)
-
-
-def create_dictionary_option(
-    db: Session,
-    payload: DictionaryOptionCreate,
-) -> DictionaryOptionResponse:
-    group = db.get(DictionaryGroup, payload.group_id)
-    if group is None:
-        raise bad_request("Dictionary group not found")
-
-    existing = db.scalar(
-        select(DictionaryOption).where(
-            DictionaryOption.group_id == payload.group_id,
-            DictionaryOption.value == payload.value,
-        )
-    )
-    if existing is not None:
-        raise bad_request("Dictionary option value already exists")
-
-    option = DictionaryOption(
-        group_id=payload.group_id,
-        label=payload.label,
-        value=payload.value,
-        sort_order=payload.sort_order,
-        is_active=True,
-    )
-    db.add(option)
-    commit_or_bad_request(db, "Dictionary option value already exists")
-    db.refresh(option)
-    return DictionaryOptionResponse.model_validate(option)
 
 
 def update_dictionary_option(

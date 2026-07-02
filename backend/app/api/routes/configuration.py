@@ -14,9 +14,7 @@ from app.schemas.configuration import (
     CategoryResponse,
     CategoryUpdate,
     ConfigBootstrapResponse,
-    DictionaryGroupCreate,
     DictionaryGroupResponse,
-    DictionaryOptionCreate,
     DictionaryOptionResponse,
     DictionaryOptionUpdate,
     FamilyMemberCreate,
@@ -38,8 +36,6 @@ from app.services.configuration import (
     create_attribute_option as create_attribute_option_record,
     create_attribute_definition as create_attribute_definition_record,
     create_category as create_category_record,
-    create_dictionary_group as create_dictionary_group_record,
-    create_dictionary_option as create_dictionary_option_record,
     create_family_member as create_family_member_record,
     create_item_status as create_item_status_record,
     create_location_node as create_location_node_record,
@@ -277,24 +273,6 @@ def update_item_status(
     user: User = Depends(require_permission("config:manage")),
 ) -> ItemStatusResponse:
     return update_item_status_record(db, status_id, payload)
-
-
-@router.post("/dictionary-groups", response_model=DictionaryGroupResponse, status_code=status.HTTP_201_CREATED)
-def create_dictionary_group(
-    payload: DictionaryGroupCreate,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_permission("config:manage")),
-) -> DictionaryGroupResponse:
-    return create_dictionary_group_record(db, payload)
-
-
-@router.post("/dictionary-options", response_model=DictionaryOptionResponse, status_code=status.HTTP_201_CREATED)
-def create_dictionary_option(
-    payload: DictionaryOptionCreate,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_permission("config:manage")),
-) -> DictionaryOptionResponse:
-    return create_dictionary_option_record(db, payload)
 
 
 @router.patch("/dictionary-options/{option_id}", response_model=DictionaryOptionResponse)
