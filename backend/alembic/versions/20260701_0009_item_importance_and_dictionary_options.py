@@ -30,12 +30,19 @@ def upgrade() -> None:
             DELETE FROM dictionary_options
             WHERE group_id IN (
                 SELECT id FROM dictionary_groups
-                WHERE code = 'storage_conditions' AND is_system = 1
+                WHERE code = 'storage_conditions' AND is_system = :is_system
             )
             """
-        )
+        ).bindparams(sa.bindparam("is_system", value=True, type_=sa.Boolean()))
     )
-    op.execute("DELETE FROM dictionary_groups WHERE code = 'storage_conditions' AND is_system = 1")
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM dictionary_groups
+            WHERE code = 'storage_conditions' AND is_system = :is_system
+            """
+        ).bindparams(sa.bindparam("is_system", value=True, type_=sa.Boolean()))
+    )
     seed_group("units", "\u5355\u4f4d", [("\u4ef6", "\u4ef6", 10), ("\u4e2a", "\u4e2a", 20), ("\u7bb1", "\u7bb1", 30), ("\u5957", "\u5957", 40)])
     seed_group("importance", "\u91cd\u8981\u7a0b\u5ea6", [("high", "\u9ad8", 10), ("medium", "\u4e2d", 20), ("low", "\u4f4e", 30)])
     seed_group("location_node_types", "\u4f4d\u7f6e\u7c7b\u578b", [("room", "\u623f\u95f4", 10), ("area", "\u533a\u57df", 20), ("cabinet", "\u67dc\u5b50", 30), ("shelf", "\u67b6\u5b50", 40), ("box", "\u7bb1/\u76d2", 50), ("other", "\u5176\u4ed6", 60)])
@@ -51,17 +58,22 @@ def seed_group(code: str, name: str, options: list[tuple[str, str, int]]) -> Non
         sa.text(
             """
             INSERT INTO dictionary_groups (code, name, is_system, is_active)
-            SELECT :code, :name, 1, 1
+            SELECT :code, :name, :is_system, :is_active
             WHERE NOT EXISTS (SELECT 1 FROM dictionary_groups WHERE code = :code)
             """
-        ).bindparams(code=code, name=name)
+        ).bindparams(
+            sa.bindparam("code", value=code),
+            sa.bindparam("name", value=name),
+            sa.bindparam("is_system", value=True, type_=sa.Boolean()),
+            sa.bindparam("is_active", value=True, type_=sa.Boolean()),
+        )
     )
     for value, label, sort_order in options:
         op.execute(
             sa.text(
                 """
                 INSERT INTO dictionary_options (group_id, label, value, sort_order, is_active)
-                SELECT dictionary_groups.id, :label, :value, :sort_order, 1
+                SELECT dictionary_groups.id, :label, :value, :sort_order, :is_active
                 FROM dictionary_groups
                 WHERE dictionary_groups.code = :code
                   AND NOT EXISTS (
@@ -70,5 +82,11 @@ def seed_group(code: str, name: str, options: list[tuple[str, str, int]]) -> Non
                       AND dictionary_options.value = :value
                   )
                 """
-            ).bindparams(code=code, label=label, value=value, sort_order=sort_order)
+            ).bindparams(
+                sa.bindparam("code", value=code),
+                sa.bindparam("label", value=label),
+                sa.bindparam("value", value=value),
+                sa.bindparam("sort_order", value=sort_order),
+                sa.bindparam("is_active", value=True, type_=sa.Boolean()),
+            )
         )

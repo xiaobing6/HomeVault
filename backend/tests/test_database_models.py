@@ -527,6 +527,22 @@ def test_item_importance_migration_removes_storage_condition_dictionary_options(
         restore_alembic_database_url(cfg)
 
 
+def test_item_importance_migration_uses_typed_boolean_binds() -> None:
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "20260701_0009_item_importance_and_dictionary_options.py"
+    )
+    migration_text = migration_path.read_text(encoding="utf-8")
+
+    assert "is_system = 1" not in migration_text
+    assert "SELECT :code, :name, 1, 1" not in migration_text
+    assert "is_system = :is_system" in migration_text
+    assert 'sa.bindparam("is_system", value=True, type_=sa.Boolean())' in migration_text
+    assert 'sa.bindparam("is_active", value=True, type_=sa.Boolean())' in migration_text
+
+
 def test_item_importance_defaults_to_medium(db_session: Session) -> None:
     item = make_item(db_session, name="Importance default")
 
