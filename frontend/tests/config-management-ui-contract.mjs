@@ -169,8 +169,23 @@ assert.match(
   /locationNodeTypeOptions/,
   'Location panel should compute location type options from dictionaries'
 )
+assert.match(
+  residenceLocationPanel,
+  /locationNodeTypeEditOptions/,
+  'Location edit type options should merge active options with the current saved value'
+)
+assert.match(
+  residenceLocationPanel,
+  /if\s*\(!locationForm\.node_type\)\s*\{[\s\S]*ElMessage\.error/,
+  'Location create save should block clearly when no active location type is selectable'
+)
 assert.doesNotMatch(
   residenceLocationPanel,
   /const\s+locationTypes\s*=\s*\[/,
   'Location type options should not be hard-coded in the location panel'
+)
+assert.doesNotMatch(
+  residenceLocationPanel,
+  /node_type:\s*'room'|node_type:\s*locationNodeTypeOptions\.value\[0\]\?\.value\s*\?\?\s*'room'/,
+  'Location create/edit state should not blindly fall back to the room type'
 )

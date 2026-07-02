@@ -54,13 +54,13 @@ const locationForm = reactive({
   residence_id: undefined as number | undefined,
   parent_id: null as number | null,
   name: '',
-  node_type: 'room'
+  node_type: ''
 })
 
 const locationEditForm = reactive({
   parent_id: null as number | null,
   name: '',
-  node_type: 'room',
+  node_type: '',
   icon: '',
   sort_order: 0,
   note: '',
@@ -72,6 +72,28 @@ const locationTree = computed(() => data.value?.location_tree ?? [])
 const locationNodeTypeOptions = computed(() =>
   dictionaryOptions(data.value, 'location_node_types')
 )
+const activeLocationNodeTypeValues = computed(() =>
+  new Set(locationNodeTypeOptions.value.map((type) => type.value))
+)
+
+const locationNodeTypeEditOptions = computed(() => {
+  const activeOptions = locationNodeTypeOptions.value.map(({ label, value }) => ({
+    label,
+    value,
+    disabled: false
+  }))
+  const currentValue = locationEditForm.node_type
+  if (!currentValue || activeLocationNodeTypeValues.value.has(currentValue)) return activeOptions
+
+  return [
+    ...activeOptions,
+    {
+      label: locationNodeTypeLabel(currentValue),
+      value: currentValue,
+      disabled: true
+    }
+  ]
+})
 
 const currentResidenceLocations = computed(() =>
   locationTree.value.filter((node) => node.residence_id === locationForm.residence_id)
@@ -102,6 +124,16 @@ watch(
   () => {
     locationForm.parent_id = null
   }
+)
+
+watch(
+  locationNodeTypeOptions,
+  (options) => {
+    if (!activeLocationNodeTypeValues.value.has(locationForm.node_type)) {
+      locationForm.node_type = options[0]?.value ?? ''
+    }
+  },
+  { immediate: true }
 )
 
 function locationNodeTypeLabel(value: string) {
@@ -250,7 +282,7 @@ function clearLocationEdit() {
   Object.assign(locationEditForm, {
     parent_id: null,
     name: '',
-    node_type: 'room',
+    node_type: '',
     icon: '',
     sort_order: 0,
     note: '',
@@ -288,6 +320,10 @@ async function saveLocation() {
   const valid = await validateForm(locationFormRef.value)
   if (!valid) return
   if (!locationForm.residence_id) return
+  if (!locationForm.node_type) {
+    ElMessage.error('请选择类型')
+    return
+  }
 
   locationSaving.value = true
   try {
@@ -300,7 +336,7 @@ async function saveLocation() {
     Object.assign(locationForm, {
       parent_id: null,
       name: '',
-      node_type: locationNodeTypeOptions.value[0]?.value ?? 'room'
+      node_type: locationNodeTypeOptions.value[0]?.value ?? ''
     })
     ElMessage.success('已保存')
   } catch (error) {
@@ -519,10 +555,11 @@ async function saveLocation() {
         <el-form-item label="类型" prop="node_type" :rules="[{ required: true, message: '请选择类型' }]">
           <el-select v-model="locationEditForm.node_type" class="full-width">
             <el-option
-              v-for="type in locationNodeTypeOptions"
+              v-for="type in locationNodeTypeEditOptions"
               :key="type.value"
               :label="type.label"
               :value="type.value"
+              :disabled="type.disabled"
             />
           </el-select>
         </el-form-item>
