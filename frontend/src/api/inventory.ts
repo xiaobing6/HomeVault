@@ -114,6 +114,7 @@ export interface ItemSummary {
   status_semantic: string
   quantity: string
   unit: string
+  importance: string
   owner_member_id: number | null
   owner_member_name: string | null
   keeper_member_id: number | null
@@ -160,6 +161,7 @@ export interface ItemFilters {
   location_node_id?: number | null
   container_item_id?: number | null
   status_id?: number | null
+  importance?: string | null
   tag?: string | null
   is_on_loan?: boolean | null
   has_pending_reminder?: boolean | null
@@ -187,6 +189,7 @@ export interface ItemCreateRequest {
   status_id: number
   quantity?: string | number
   unit?: string
+  importance?: string
   owner_member_id?: number | null
   keeper_member_id?: number | null
   location_node_id?: number | null
@@ -202,6 +205,7 @@ export interface ItemUpdateRequest {
   description?: string | null
   category_id?: number
   unit?: string
+  importance?: string
   owner_member_id?: number | null
   keeper_member_id?: number | null
   is_container?: boolean

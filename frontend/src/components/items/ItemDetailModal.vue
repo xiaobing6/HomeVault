@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import {
   Box,
   Edit,
@@ -17,6 +18,8 @@ import type {
   ItemMovement,
   ItemQuantityChange
 } from '../../api/inventory'
+import { useConfigurationStore } from '../../stores/configuration'
+import { dictionaryLabel } from '../../utils/dictionaries'
 import MediaUploader from './MediaUploader.vue'
 import ProtectedImage from './ProtectedImage.vue'
 
@@ -41,6 +44,8 @@ const emit = defineEmits<{
 }>()
 
 const EXIT_STATUS_SEMANTICS = new Set(['removed', 'missing', 'consumed', 'retired', 'lost', 'disposed'])
+const configuration = useConfigurationStore()
+const { data } = storeToRefs(configuration)
 
 const activeLoan = computed(() => {
   const loans = props.item?.loans ?? []
@@ -65,6 +70,7 @@ const privacyLabel = computed(() => {
   if (level === 'sensitive') return '敏感'
   return '普通'
 })
+const importanceLabel = computed(() => dictionaryLabel(data.value, 'importance', props.item?.importance))
 
 const canMoveItem = computed(() => {
   const item = props.item
@@ -235,6 +241,7 @@ function quantityText(row: ItemQuantityChange): string {
                 <el-descriptions-item label="分类">{{ item.category_name || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="状态">{{ item.status_name || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="数量">{{ item.quantity }} {{ item.unit }}</el-descriptions-item>
+                <el-descriptions-item label="Importance">{{ importanceLabel }}</el-descriptions-item>
                 <el-descriptions-item label="位置">{{ placementText }}</el-descriptions-item>
                 <el-descriptions-item label="容器">
                   {{ item.is_container ? '是' : '否' }}

@@ -8,6 +8,7 @@ import { getChineseErrorMessage } from '../../api/client'
 import type { Category, LocationNode, Residence } from '../../api/configuration'
 import { useConfigurationStore } from '../../stores/configuration'
 import { useInventoryStore } from '../../stores/inventory'
+import { dictionaryOptions } from '../../utils/dictionaries'
 
 interface FilterTreeNode {
   id: string
@@ -31,6 +32,14 @@ const locationSelectedKey = computed(() => {
 const categorySelectedKey = computed(() =>
   inventory.filters.category_id ? `category-${inventory.filters.category_id}` : ''
 )
+const importanceOptions = computed(() => dictionaryOptions(data.value, 'importance'))
+
+const importanceValue = computed({
+  get: () => inventory.filters.importance ?? '',
+  set: (value: string) => {
+    void applyFilters({ importance: value || null })
+  }
+})
 
 const quickFilters = computed({
   get: () => [
@@ -175,6 +184,21 @@ async function resetFilters() {
     <section class="filter-section">
       <div class="section-title">
         <el-icon><Location /></el-icon>
+        <span>Importance</span>
+      </div>
+      <el-select v-model="importanceValue" clearable class="full-width">
+        <el-option
+          v-for="option in importanceOptions"
+          :key="option.value"
+          :label="option.label"
+          :value="option.value"
+        />
+      </el-select>
+    </section>
+
+    <section class="filter-section">
+      <div class="section-title">
+        <el-icon><Location /></el-icon>
         <span>快捷筛选</span>
       </div>
       <el-checkbox-group v-model="quickFilters" class="quick-filters">
@@ -218,6 +242,10 @@ async function resetFilters() {
   display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+.full-width {
+  width: 100%;
 }
 
 .section-title {

@@ -19,6 +19,7 @@ import type {
 } from '../../api/inventory'
 import { useConfigurationStore } from '../../stores/configuration'
 import { useInventoryStore } from '../../stores/inventory'
+import { dictionaryOptions } from '../../utils/dictionaries'
 import CustomFieldInputs from './CustomFieldInputs.vue'
 import MediaUploader from './MediaUploader.vue'
 
@@ -34,6 +35,7 @@ interface ItemFormModel {
   status_id: number | null
   quantity: number | null
   unit: string
+  importance: string
   owner_member_id: number | null
   keeper_member_id: number | null
   location_node_id: number | null
@@ -118,6 +120,7 @@ const unitOptions = computed<DictionaryOption[]>(() => {
     .filter((option) => option.is_active)
     .sort((left, right) => left.sort_order - right.sort_order || left.id - right.id)
 })
+const importanceOptions = computed(() => dictionaryOptions(data.value, 'importance'))
 const locationOptions = computed<OptionItem[]>(() => {
   const residenceNameById = new Map((data.value?.residences ?? []).map((residence) => [
     residence.id,
@@ -204,6 +207,7 @@ function createEmptyForm(): ItemFormModel {
     status_id: null,
     quantity: 1,
     unit: '件',
+    importance: 'medium',
     owner_member_id: null,
     keeper_member_id: null,
     location_node_id: null,
@@ -229,6 +233,7 @@ function resetForm() {
       status_id: item.status_id,
       quantity: Number(item.quantity),
       unit: item.unit || '件',
+      importance: item.importance || 'medium',
       owner_member_id: item.owner_member_id,
       keeper_member_id: item.keeper_member_id,
       location_node_id: item.location_node_id,
@@ -244,7 +249,10 @@ function resetForm() {
   } else {
     Object.assign(form, createEmptyForm(), {
       status_id: defaultStatus.value?.id ?? null,
-      unit: unitOptions.value[0]?.value || '件'
+      unit: unitOptions.value[0]?.value || '件',
+      importance: importanceOptions.value.find((option) => option.value === 'medium')?.value
+        ?? importanceOptions.value[0]?.value
+        ?? 'medium'
     })
     attributeValues.value = {}
     placementType.value = 'location'
@@ -408,6 +416,7 @@ function buildCreatePayload(): ItemCreateRequest {
     status_id: form.status_id as number,
     quantity: form.quantity ?? 1,
     unit: form.unit.trim(),
+    importance: form.importance,
     owner_member_id: form.owner_member_id,
     keeper_member_id: form.keeper_member_id,
     location_node_id: isExitPlacementStatus.value ? null : form.location_node_id,
@@ -425,6 +434,7 @@ function buildUpdatePayload(): ItemUpdateRequest {
     description: form.description.trim(),
     category_id: form.category_id as number,
     unit: form.unit.trim(),
+    importance: form.importance,
     owner_member_id: form.owner_member_id,
     keeper_member_id: form.keeper_member_id,
     is_container: form.is_container,
@@ -641,6 +651,17 @@ function closeDrawer() {
                 <el-option
                   v-for="option in unitOptions"
                   :key="option.id"
+                  :label="option.label"
+                  :value="option.value"
+                />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="Importance">
+              <el-select v-model="form.importance" class="full-width">
+                <el-option
+                  v-for="option in importanceOptions"
+                  :key="option.value"
                   :label="option.label"
                   :value="option.value"
                 />

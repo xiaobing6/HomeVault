@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import type { TableInstance } from 'element-plus'
 import type { ItemSummary } from '../../api/inventory'
+import { useConfigurationStore } from '../../stores/configuration'
+import { dictionaryLabel } from '../../utils/dictionaries'
 
 const props = defineProps<{
   items: ItemSummary[]
@@ -14,6 +17,12 @@ const emit = defineEmits<{
 }>()
 
 const tableRef = ref<TableInstance>()
+const configuration = useConfigurationStore()
+const { data } = storeToRefs(configuration)
+
+function importanceLabel(value: string) {
+  return dictionaryLabel(data.value, 'importance', value)
+}
 
 function handleRowClick(row: ItemSummary, column?: { type?: string }) {
   if (column?.type === 'selection') return
@@ -68,6 +77,9 @@ watch(
     </el-table-column>
     <el-table-column label="数量" width="108">
       <template #default="{ row }">{{ row.quantity }} {{ row.unit }}</template>
+    </el-table-column>
+    <el-table-column label="Importance" width="96">
+      <template #default="{ row }">{{ importanceLabel(row.importance) }}</template>
     </el-table-column>
     <el-table-column label="保管人" min-width="120" show-overflow-tooltip>
       <template #default="{ row }">
