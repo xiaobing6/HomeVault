@@ -10,14 +10,30 @@ function readSource(relativePath) {
   return readFileSync(resolve(root, relativePath), 'utf8')
 }
 
+function readInterfaceBlock(source, interfaceName) {
+  const interfacePattern = new RegExp(
+    `export interface ${interfaceName}\\s*\\{[\\s\\S]*?\\r?\\n\\}`
+  )
+  const match = source.match(interfacePattern)
+  assert.ok(match, `${interfaceName} interface should exist`)
+  return match[0]
+}
+
 const inventoryApi = readSource('src/api/inventory.ts')
 const itemFormDrawer = readSource('src/components/items/ItemFormDrawer.vue')
 const itemDetailModal = readSource('src/components/items/ItemDetailModal.vue')
 const itemTable = readSource('src/components/items/ItemTable.vue')
 const itemFilterPanel = readSource('src/components/items/ItemFilterPanel.vue')
 
-assert.match(inventoryApi, /importance:\s*string/, 'Inventory item summary should expose importance')
-assert.match(inventoryApi, /importance\?:\s*string/, 'Inventory create/update/filter payloads should accept importance')
+const itemSummary = readInterfaceBlock(inventoryApi, 'ItemSummary')
+const itemFilters = readInterfaceBlock(inventoryApi, 'ItemFilters')
+const itemCreateRequest = readInterfaceBlock(inventoryApi, 'ItemCreateRequest')
+const itemUpdateRequest = readInterfaceBlock(inventoryApi, 'ItemUpdateRequest')
+
+assert.match(itemSummary, /importance:\s*string/, 'Inventory item summary should expose importance')
+assert.match(itemFilters, /importance\?:\s*string\s*\|\s*null/, 'Inventory filters should accept importance')
+assert.match(itemCreateRequest, /importance\?:\s*string/, 'Inventory create payload should accept importance')
+assert.match(itemUpdateRequest, /importance\?:\s*string/, 'Inventory update payload should accept importance')
 assert.match(itemFormDrawer, /importanceOptions/, 'Item form should compute importance dictionary options')
 assert.match(itemFormDrawer, /v-model="form\.importance"/, 'Item form should bind importance select')
 assert.match(itemDetailModal, /importanceLabel/, 'Item detail should render an importance label')
