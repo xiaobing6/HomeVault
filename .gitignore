@@ -30,6 +30,9 @@ logs/
 pytest-basetemp/
 .pytest-basetemp/
 output/
+e2e/.runtime/
+e2e/test-results/
+e2e/playwright-report/
 
 # Node / frontend
 node_modules/

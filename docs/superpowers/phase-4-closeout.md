@@ -1,9 +1,9 @@
 # HomeVault Phase 4 Closeout
 
-Date: 2026-07-01
+Date: 2026-07-02
 Branch checked: `phase-1-foundation`
 
-This document records the current project closeout after Phase 4C-5. It is a status and handoff document only; it does not introduce new business behavior.
+This document records the current project closeout after Phase 4C-5 and the dictionary-backed importance/location-type follow-up. It is a status and handoff document only; it does not introduce new business behavior.
 
 ## Current Completion Status
 
@@ -29,6 +29,7 @@ Complete for the planned first inventory scope.
 - Item create/edit/detail/list workflows.
 - Card and table views, search and filtering.
 - Images, attachments, tags, ownership, keeper, location/container placement, and privacy level.
+- Dictionary-backed item importance in create/edit/detail/list/filter/import/export flows.
 - Status changes, movement history, quantity history, loans, returns, and archive handling.
 - `privacy_level=sensitive` is enforced as a visibility boundary for non-admin users.
 
@@ -59,24 +60,25 @@ Complete through 4C-5.
 - 4C-3: inventory bulk operations and CSV export.
 - 4C-4: safe create-only inventory CSV import with template download, preview validation, one-time confirmation tokens, and frontend import dialog.
 - 4C-5: custom role management with read-only system permissions, read-only built-in roles, custom role create/edit/activate/deactivate, active-role assignment, and role mutation audit logging.
+- Dictionary follow-up: item importance and location node types are dictionary-backed; administrators can edit existing dictionary option labels, sort order, and active state.
 
 ## Deliberately Deferred Work
 
 These are not current-phase defects. They are intentionally outside the implemented slices and should get their own spec/plan before implementation.
 
 - Permission-code editing remains deferred. Permission codes are still system-owned and are not administrator-created records.
-- Dictionary group and dictionary option editing: currently read-only by design. Item statuses are editable, but generic dictionary groups/options are not.
+- Full dictionary management remains deferred. Existing dictionary option labels, sort order, and active state are editable, but dictionary group creation/deletion, option creation/deletion, option value changes, and group membership changes remain out of scope.
 - Import updates/merges: 4C-4 import is create-only. It does not update existing items, merge duplicates, import images, or import attachments.
 - QR code and scan workflows.
 - WeChat mini program, WeChat login, and external notification channels.
 - Reminder recurrence, snooze, and broader household-task reminder sources.
-- Formal end-to-end browser CI. Current verification relies on backend tests, frontend contracts, type checks, and build checks.
+- Formal end-to-end browser CI. A repeatable local Playwright baseline exists under `e2e/`, but CI gating is not wired yet.
 
 ## Current Risk Boundaries
 
 - Role model: `admin`, `editor`, and `viewer` remain system-defined and read-only. Custom non-system roles can be created, edited, activated, and deactivated.
 - Permissions: permissions are seeded application capabilities, not administrator-created records.
-- Dictionary records: dictionary groups/options are exposed for reading and bootstrapping workflows; editing remains out of scope.
+- Dictionary records: existing option labels, sort order, and active state can be edited. Permission-like values, group creation/deletion, option creation/deletion, option value changes, and group membership changes remain system-owned.
 - CSV import: preview tokens are in memory and time-limited, so previews do not survive backend restart. This is acceptable for the current local-first workflow.
 - Audit coverage: key mutation flows are covered. If new mutable features are added, their service layer should explicitly write audit events.
 - Media import: images and attachments stay in the interactive item form/media uploader path.
@@ -85,14 +87,14 @@ These are not current-phase defects. They are intentionally outside the implemen
 
 Recommended order:
 
-1. Dictionary group/option editing if the product needs configurable dictionaries beyond item statuses and attribute options.
-2. Import/export v2 for update/merge strategy and media handling.
-3. Browser-based E2E acceptance suite for login, configuration, inventory, reminders, audit logs, import, and bulk workflows.
+1. Import/export v2 for update/merge strategy and media handling.
+2. Promote the local Playwright E2E baseline into CI and expand coverage beyond smoke acceptance.
+3. Full dictionary management only if the product needs administrator-created dictionary groups/options.
 4. QR code, mobile, and external notification integrations.
 
 ## Verification Record
 
-Last verification: 2026-07-01.
+Last verification: 2026-07-02.
 
 Commands run:
 
@@ -105,6 +107,9 @@ Get-ChildItem -Path .\tests -Filter *.mjs | ForEach-Object { node $_.FullName }
 .\node_modules\.bin\vue-tsc.cmd --noEmit -p tsconfig.contract.json
 npm.cmd run build
 
+Set-Location F:\HomeVault\e2e
+npm.cmd test
+
 Set-Location F:\HomeVault
 git diff --check
 git status --short --branch
@@ -112,11 +117,10 @@ git status --short --branch
 
 Results:
 
-- Backend `python -m pytest -q`: `186 passed, 1 warning`. The warning is the existing Starlette `TestClient` / `httpx` deprecation warning.
+- Backend `python -m pytest -q`: `212 passed, 1 warning`. The warning is the existing Starlette `TestClient` / `httpx` deprecation warning.
 - Frontend `.mjs` contract/runtime checks: exit code 0.
 - Frontend `vue-tsc --noEmit -p tsconfig.contract.json`: exit code 0.
 - Frontend `npm.cmd run build`: exit code 0. Existing Vite/Rollup warnings remain for VueUse pure annotations and large chunks.
+- E2E `npm.cmd test`: `2 passed`. The suite starts an isolated SQLite-backed backend, the Vite frontend, and Chromium via Playwright.
 - `git diff --check`: exit code 0.
-- `git status --short --branch` before committing this closeout: branch `phase-1-foundation` matched `origin/phase-1-foundation`; only this new closeout document was untracked.
-
-No browser-based manual acceptance run was performed as part of this closeout pass.
+- `git status --short --branch`: branch `phase-1-foundation`; changes are the planned backend test fixes, closeout/plan docs, and new `e2e/` suite files.

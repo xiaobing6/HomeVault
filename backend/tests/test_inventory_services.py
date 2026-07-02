@@ -13,6 +13,8 @@ from app.models.configuration import (
     AttributeDefinition,
     AttributeOption,
     Category,
+    DictionaryGroup,
+    DictionaryOption,
     FamilyMember,
     HomeSpace,
     ItemStatus,
@@ -46,6 +48,10 @@ from app.services.inventory import (
 
 @pytest.fixture()
 def inventory_seed(db_session: Session) -> dict[str, object]:
+    importance_group = DictionaryGroup(code="importance", name="Importance", is_system=True)
+    DictionaryOption(group=importance_group, label="High", value="high", sort_order=10)
+    DictionaryOption(group=importance_group, label="Medium", value="medium", sort_order=20)
+    DictionaryOption(group=importance_group, label="Low", value="low", sort_order=30)
     creator = User(id=42, username="creator", password_hash="hash", display_name="Creator")
     editor = User(id=7, username="editor", password_hash="hash", display_name="Editor")
     archiver = User(id=99, username="archiver", password_hash="hash", display_name="Archiver")
@@ -113,7 +119,7 @@ def inventory_seed(db_session: Session) -> dict[str, object]:
     loaned = ItemStatus(code="loaned", name="Loaned", semantic="away", sort_order=20, is_system=True)
     removed = ItemStatus(code="removed", name="Removed", semantic="removed", sort_order=30, is_system=True)
     retired = ItemStatus(code="retired", name="Retired", semantic="retired", sort_order=40, is_system=True)
-    db_session.add_all([creator, editor, archiver, home, category, in_stock, loaned, removed, retired])
+    db_session.add_all([importance_group, creator, editor, archiver, home, category, in_stock, loaned, removed, retired])
     db_session.commit()
 
     return {
