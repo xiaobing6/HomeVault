@@ -109,6 +109,12 @@ export interface DictionaryOption {
   is_active: boolean
 }
 
+export interface DictionaryOptionUpdate {
+  label: string
+  sort_order: number
+  is_active: boolean
+}
+
 export interface DictionaryGroup {
   id: number
   code: string
@@ -331,6 +337,14 @@ export async function updateAttributeOptionApi(
   payload: AttributeOptionUpdate
 ): Promise<AttributeOption> {
   const response = await apiClient.patch<AttributeOption>(`/config/attribute-options/${optionId}`, payload)
+  return response.data
+}
+
+export async function updateDictionaryOptionApi(
+  optionId: number,
+  payload: DictionaryOptionUpdate
+): Promise<DictionaryOption> {
+  const response = await apiClient.patch<DictionaryOption>(`/config/dictionary-options/${optionId}`, payload)
   return response.data
 }
 

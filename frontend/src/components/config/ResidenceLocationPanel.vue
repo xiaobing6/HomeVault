@@ -7,6 +7,7 @@ import { CirclePlus, Edit, Plus } from '@element-plus/icons-vue'
 import { getChineseErrorMessage } from '../../api/client'
 import type { LocationNode, Residence } from '../../api/configuration'
 import { useConfigurationStore } from '../../stores/configuration'
+import { dictionaryLabel, dictionaryOptions } from '../../utils/dictionaries'
 
 interface LocationOption {
   id: number
@@ -66,17 +67,11 @@ const locationEditForm = reactive({
   is_active: true
 })
 
-const locationTypes = [
-  { label: '房间', value: 'room' },
-  { label: '区域', value: 'area' },
-  { label: '柜体', value: 'cabinet' },
-  { label: '层架', value: 'shelf' },
-  { label: '箱盒', value: 'box' },
-  { label: '其他', value: 'other' }
-]
-
 const residences = computed(() => data.value?.residences ?? [])
 const locationTree = computed(() => data.value?.location_tree ?? [])
+const locationNodeTypeOptions = computed(() =>
+  dictionaryOptions(data.value, 'location_node_types')
+)
 
 const currentResidenceLocations = computed(() =>
   locationTree.value.filter((node) => node.residence_id === locationForm.residence_id)
@@ -109,10 +104,14 @@ watch(
   }
 )
 
+function locationNodeTypeLabel(value: string) {
+  return dictionaryLabel(data.value, 'location_node_types', value)
+}
+
 function toTreeNodes(nodes: LocationNode[]): TreeNode[] {
   return nodes.map((node) => ({
     id: `location-${node.id}`,
-    label: `${node.name} · ${node.node_type}`,
+    label: `${node.name} · ${locationNodeTypeLabel(node.node_type)}`,
     location: node,
     children: toTreeNodes(node.children ?? [])
   }))
@@ -298,7 +297,11 @@ async function saveLocation() {
       name: locationForm.name.trim(),
       node_type: locationForm.node_type
     })
-    Object.assign(locationForm, { parent_id: null, name: '', node_type: 'room' })
+    Object.assign(locationForm, {
+      parent_id: null,
+      name: '',
+      node_type: locationNodeTypeOptions.value[0]?.value ?? 'room'
+    })
     ElMessage.success('已保存')
   } catch (error) {
     ElMessage.error(getChineseErrorMessage(error))
@@ -395,7 +398,7 @@ async function saveLocation() {
           <el-form-item label="类型" prop="node_type" :rules="[{ required: true, message: '请选择类型' }]">
             <el-select v-model="locationForm.node_type" class="full-width">
               <el-option
-                v-for="type in locationTypes"
+                v-for="type in locationNodeTypeOptions"
                 :key="type.value"
                 :label="type.label"
                 :value="type.value"
@@ -516,7 +519,7 @@ async function saveLocation() {
         <el-form-item label="类型" prop="node_type" :rules="[{ required: true, message: '请选择类型' }]">
           <el-select v-model="locationEditForm.node_type" class="full-width">
             <el-option
-              v-for="type in locationTypes"
+              v-for="type in locationNodeTypeOptions"
               :key="type.value"
               :label="type.label"
               :value="type.value"

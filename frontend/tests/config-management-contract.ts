@@ -7,6 +7,7 @@ import {
   updateFamilyMemberApi,
   updateItemStatusApi,
   updateLocationNodeApi,
+  updateDictionaryOptionApi,
   type AttributeDefinition,
   type AttributeDefinitionUpdate,
   type AttributeOption,
@@ -14,6 +15,8 @@ import {
   type AttributeOptionUpdate,
   type Category,
   type CategoryUpdate,
+  type DictionaryOption,
+  type DictionaryOptionUpdate,
   type FamilyMember,
   type FamilyMemberUpdate,
   type ItemStatus,
@@ -90,6 +93,12 @@ const itemStatusUpdatePayload: ItemStatusUpdate = {
   is_active: true
 }
 
+const dictionaryPayload: DictionaryOptionUpdate = {
+  label: 'High value',
+  sort_order: 5,
+  is_active: false
+}
+
 async function assertConfigurationApiContract() {
   expectType<LocationNode>(await updateLocationNodeApi(1, locationUpdatePayload))
   expectType<FamilyMember>(await updateFamilyMemberApi(1, memberUpdatePayload))
@@ -99,6 +108,7 @@ async function assertConfigurationApiContract() {
   expectType<AttributeOption>(await updateAttributeOptionApi(1, optionUpdatePayload))
   expectType<ItemStatus>(await createItemStatusApi(itemStatusCreatePayload))
   expectType<ItemStatus>(await updateItemStatusApi(1, itemStatusUpdatePayload))
+  expectType<DictionaryOption>(await updateDictionaryOptionApi(1, dictionaryPayload))
 }
 
 async function assertConfigurationStoreContract() {
@@ -112,6 +122,7 @@ async function assertConfigurationStoreContract() {
   await configuration.updateAttributeOption(1, optionUpdatePayload)
   await configuration.createItemStatus(itemStatusCreatePayload)
   await configuration.updateItemStatus(1, itemStatusUpdatePayload)
+  void configuration.updateDictionaryOption(1, dictionaryPayload)
 }
 
 void assertConfigurationApiContract

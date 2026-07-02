@@ -5,7 +5,7 @@ import { ElMessage, type FormInstance } from 'element-plus'
 import { Edit, Plus } from '@element-plus/icons-vue'
 
 import { getChineseErrorMessage } from '../../api/client'
-import type { ItemStatus } from '../../api/configuration'
+import type { DictionaryOption, ItemStatus } from '../../api/configuration'
 import { useConfigurationStore } from '../../stores/configuration'
 
 const configuration = useConfigurationStore()
@@ -17,6 +17,10 @@ const statusSaving = ref(false)
 const statusEditSaving = ref(false)
 const statusEditOpen = ref(false)
 const editingStatus = ref<ItemStatus | null>(null)
+const dictionaryOptionEditFormRef = ref<FormInstance>()
+const dictionaryOptionEditOpen = ref(false)
+const dictionaryOptionEditSaving = ref(false)
+const editingDictionaryOption = ref<DictionaryOption | null>(null)
 
 const statusForm = reactive({
   code: '',
@@ -28,6 +32,12 @@ const statusForm = reactive({
 const statusEditForm = reactive({
   name: '',
   semantic: 'available',
+  sort_order: 0,
+  is_active: true
+})
+
+const dictionaryOptionEditForm = reactive({
+  label: '',
   sort_order: 0,
   is_active: true
 })
@@ -74,6 +84,21 @@ function clearStatusEdit() {
   })
 }
 
+function openDictionaryOptionEdit(option: DictionaryOption) {
+  editingDictionaryOption.value = option
+  Object.assign(dictionaryOptionEditForm, {
+    label: option.label,
+    sort_order: option.sort_order,
+    is_active: option.is_active
+  })
+  dictionaryOptionEditOpen.value = true
+}
+
+function clearDictionaryOptionEdit() {
+  editingDictionaryOption.value = null
+  Object.assign(dictionaryOptionEditForm, { label: '', sort_order: 0, is_active: true })
+}
+
 async function saveItemStatus() {
   trimStatusForm()
   const valid = await validateForm(statusFormRef.value)
@@ -115,6 +140,27 @@ async function updateItemStatus() {
     ElMessage.error(getChineseErrorMessage(error))
   } finally {
     statusEditSaving.value = false
+  }
+}
+
+async function updateDictionaryOption() {
+  dictionaryOptionEditForm.label = dictionaryOptionEditForm.label.trim()
+  const valid = await validateForm(dictionaryOptionEditFormRef.value)
+  if (!valid || !editingDictionaryOption.value) return
+
+  dictionaryOptionEditSaving.value = true
+  try {
+    await configuration.updateDictionaryOption(editingDictionaryOption.value.id, {
+      label: dictionaryOptionEditForm.label,
+      sort_order: Number(dictionaryOptionEditForm.sort_order) || 0,
+      is_active: dictionaryOptionEditForm.is_active
+    })
+    dictionaryOptionEditOpen.value = false
+    ElMessage.success('已保存')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    dictionaryOptionEditSaving.value = false
   }
 }
 </script>
@@ -209,11 +255,19 @@ async function updateItemStatus() {
             <el-table :data="row.options" size="small" class="nested-table">
               <el-table-column prop="label" label="选项" min-width="140" />
               <el-table-column prop="value" label="值" min-width="140" />
+              <el-table-column prop="sort_order" label="排序" width="86" />
               <el-table-column prop="is_active" label="启用" width="86">
                 <template #default="{ row: option }">
                   <el-tag size="small" :type="option.is_active ? 'success' : 'info'">
                     {{ option.is_active ? '是' : '否' }}
                   </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="92" fixed="right">
+                <template #default="{ row: option }">
+                  <el-button text type="primary" :icon="Edit" @click="openDictionaryOptionEdit(option)">
+                    编辑
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -289,6 +343,52 @@ async function updateItemStatus() {
     <template #footer>
       <el-button @click="statusEditOpen = false">取消</el-button>
       <el-button type="primary" :loading="statusEditSaving" @click="updateItemStatus">
+        保存
+      </el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog
+    v-model="dictionaryOptionEditOpen"
+    title="编辑字典选项"
+    width="520px"
+    destroy-on-close
+    @closed="clearDictionaryOptionEdit"
+  >
+    <el-form
+      ref="dictionaryOptionEditFormRef"
+      :model="dictionaryOptionEditForm"
+      label-position="top"
+      class="compact-form"
+    >
+      <el-form-item label="值">
+        <el-input :model-value="editingDictionaryOption?.value" class="readonly-value" readonly disabled />
+      </el-form-item>
+      <div class="form-row">
+        <el-form-item label="选项" prop="label" :rules="[{ required: true, message: '请输入选项' }]">
+          <el-input v-model="dictionaryOptionEditForm.label" maxlength="80" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number
+            v-model="dictionaryOptionEditForm.sort_order"
+            :min="0"
+            :step="1"
+            controls-position="right"
+            class="full-width"
+          />
+        </el-form-item>
+      </div>
+      <el-form-item label="状态">
+        <el-switch
+          v-model="dictionaryOptionEditForm.is_active"
+          active-text="启用"
+          inactive-text="停用"
+        />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="dictionaryOptionEditOpen = false">取消</el-button>
+      <el-button type="primary" :loading="dictionaryOptionEditSaving" @click="updateDictionaryOption">
         保存
       </el-button>
     </template>

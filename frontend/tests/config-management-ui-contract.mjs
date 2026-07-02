@@ -149,8 +149,28 @@ assert.match(
   /<el-switch[\s\S]*v-model="statusEditForm\.is_active"/,
   'Item status edit dialog should expose active state with a switch'
 )
+assert.match(
+  dictionaryPanel,
+  /configuration\.updateDictionaryOption\(\s*editingDictionaryOption\.value\.id/,
+  'Dictionary panel should update existing dictionary options'
+)
+assert.match(
+  dictionaryPanel,
+  /<el-switch[\s\S]*v-model="dictionaryOptionEditForm\.is_active"/,
+  'Dictionary option edit dialog should expose active state'
+)
 assert.doesNotMatch(
   dictionaryPanel,
-  /updateDictionary(Group|Option)|dictionary(Group|Option)EditOpen|openDictionary(Group|Option)Edit|dictionaryEditOpen|openDictionaryEdit/,
-  'Dictionary groups and dictionary options should remain read-only in this slice'
+  /configuration\.createDictionaryOption|configuration\.createDictionaryGroup|deleteDictionaryOption|deleteDictionaryGroup/,
+  'Dictionary panel should not expose dictionary create or delete controls'
+)
+assert.match(
+  residenceLocationPanel,
+  /locationNodeTypeOptions/,
+  'Location panel should compute location type options from dictionaries'
+)
+assert.doesNotMatch(
+  residenceLocationPanel,
+  /const\s+locationTypes\s*=\s*\[/,
+  'Location type options should not be hard-coded in the location panel'
 )

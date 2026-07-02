@@ -12,6 +12,7 @@ import {
   updateAttributeDefinitionApi,
   updateAttributeOptionApi,
   updateCategoryApi,
+  updateDictionaryOptionApi,
   updateFamilyMemberApi,
   updateItemStatusApi,
   updateLocationNodeApi,
@@ -23,6 +24,7 @@ import {
   type CategoryCreate,
   type CategoryUpdate,
   type ConfigBootstrap,
+  type DictionaryOptionUpdate,
   type FamilyMemberCreate,
   type FamilyMemberUpdate,
   type ItemStatusCreate,
@@ -95,6 +97,10 @@ export const useConfigurationStore = defineStore('configuration', {
     },
     async updateAttributeOption(optionId: number, payload: AttributeOptionUpdate) {
       await updateAttributeOptionApi(optionId, payload)
+      await this.load()
+    },
+    async updateDictionaryOption(optionId: number, payload: DictionaryOptionUpdate) {
+      await updateDictionaryOptionApi(optionId, payload)
       await this.load()
     },
     async createItemStatus(payload: ItemStatusCreate) {
