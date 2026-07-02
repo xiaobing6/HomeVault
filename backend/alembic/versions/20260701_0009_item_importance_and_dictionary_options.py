@@ -24,6 +24,17 @@ def upgrade() -> None:
     if op.get_context().dialect.name != "sqlite":
         op.alter_column("items", "importance", server_default=None)
 
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM dictionary_options
+            WHERE group_id IN (
+                SELECT id FROM dictionary_groups
+                WHERE code = 'storage_conditions' AND is_system = 1
+            )
+            """
+        )
+    )
     op.execute("DELETE FROM dictionary_groups WHERE code = 'storage_conditions' AND is_system = 1")
     seed_group("units", "\u5355\u4f4d", [("\u4ef6", "\u4ef6", 10), ("\u4e2a", "\u4e2a", 20), ("\u7bb1", "\u7bb1", 30), ("\u5957", "\u5957", 40)])
     seed_group("importance", "\u91cd\u8981\u7a0b\u5ea6", [("high", "\u9ad8", 10), ("medium", "\u4e2d", 20), ("low", "\u4f4e", 30)])

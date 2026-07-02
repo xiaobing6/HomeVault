@@ -470,6 +470,63 @@ def test_audit_log_migration_exists_and_round_trips(tmp_path: Path) -> None:
         restore_alembic_database_url(cfg)
 
 
+def test_item_importance_migration_removes_storage_condition_dictionary_options(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "item_importance_storage_conditions.sqlite3"
+    cfg = alembic_config(str(db_path))
+    inserted_value = "legacy-room-temperature"
+
+    try:
+        script = ScriptDirectory.from_config(cfg)
+        revision = script.get_revision("20260701_0009")
+
+        assert revision is not None
+        assert revision.down_revision == "20260701_0008"
+
+        command.upgrade(cfg, "20260701_0008")
+
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as connection:
+                group_id = connection.execute(
+                    text(
+                        "INSERT INTO dictionary_groups (code, name, is_system, is_active) "
+                        "VALUES ('storage_conditions', 'Storage conditions', 1, 1)"
+                    )
+                ).lastrowid
+                connection.execute(
+                    text(
+                        "INSERT INTO dictionary_options (group_id, label, value, sort_order, is_active) "
+                        "VALUES (:group_id, 'Room temperature', :value, 10, 1)"
+                    ),
+                    {"group_id": group_id, "value": inserted_value},
+                )
+
+            command.upgrade(cfg, "20260701_0009")
+
+            item_columns = {column["name"] for column in inspect(engine).get_columns("items")}
+            with engine.connect() as connection:
+                storage_group_count = connection.execute(
+                    text(
+                        "SELECT COUNT(*) FROM dictionary_groups "
+                        "WHERE code = 'storage_conditions' AND is_system = 1"
+                    )
+                ).scalar_one()
+                inserted_option_count = connection.execute(
+                    text("SELECT COUNT(*) FROM dictionary_options WHERE value = :value"),
+                    {"value": inserted_value},
+                ).scalar_one()
+        finally:
+            engine.dispose()
+
+        assert storage_group_count == 0
+        assert inserted_option_count == 0
+        assert "importance" in item_columns
+    finally:
+        restore_alembic_database_url(cfg)
+
+
 def test_item_importance_defaults_to_medium(db_session: Session) -> None:
     item = make_item(db_session, name="Importance default")
 
