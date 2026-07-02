@@ -384,6 +384,28 @@ def test_inventory_csv_export_supports_filters_selection_and_privacy(client: Tes
 
     assert filtered.status_code == 200
     assert filtered.headers["content-type"].startswith("text/csv")
+    assert filtered.text.splitlines()[0].split(",") == [
+        "id",
+        "name",
+        "description",
+        "category",
+        "status",
+        "quantity",
+        "unit",
+        "importance",
+        "owner",
+        "keeper",
+        "residence",
+        "location",
+        "container",
+        "privacy_level",
+        "is_container",
+        "is_archived",
+        "tags",
+        "custom_fields",
+        "created_at",
+        "updated_at",
+    ]
     filtered_rows = list(csv.DictReader(StringIO(filtered.text)))
     assert [row["name"] for row in filtered_rows] == ["Book archive"]
 
@@ -416,13 +438,14 @@ def test_inventory_import_template_includes_static_and_custom_columns(
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     header = response.text.splitlines()[0].split(",")
-    assert header[:14] == [
+    assert header[:15] == [
         "name",
         "description",
         "category",
         "status",
         "quantity",
         "unit",
+        "importance",
         "owner",
         "keeper",
         "residence",
@@ -462,6 +485,49 @@ def test_inventory_import_preview_validates_rows_without_creating_items(
     assert body["rows"][0]["normalized"]["privacy_level"] == "sensitive"
     assert body["rows"][0]["warnings"] == []
     assert item_count is None
+
+
+def test_inventory_export_outputs_importance_label(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    payload = make_item_payload(inventory_ids(db_session))
+    payload["importance"] = "high"
+    created = client.post("/api/items", headers=headers, json=payload)
+    assert created.status_code == 201
+
+    response = client.post("/api/items/export.csv", headers=headers, json={"item_ids": [created.json()["id"]]})
+
+    assert response.status_code == 200
+    assert "importance" in response.text.splitlines()[0].split(",")
+    assert "high" not in response.text.splitlines()[1]
+    assert "\u9ad8" in response.text.splitlines()[1]
+
+
+def test_inventory_import_accepts_importance_value_and_label(
+    client: TestClient,
+) -> None:
+    headers = login(client)
+    csv_content = "\n".join(
+        [
+            "name,description,category,status,quantity,unit,importance,owner,keeper,residence,location,container,is_container,privacy_level,tags",
+            "High item,From CSV,documents,in_stock,1,pcs,high,Alex,Alex,Main residence,Shelf,,false,normal,",
+            "Low item,From CSV,documents,in_stock,1,pcs,\u4f4e,Alex,Alex,Main residence,Shelf,,false,normal,",
+        ]
+    )
+
+    response = client.post(
+        "/api/items/import/preview",
+        headers=headers,
+        files={"file": ("items.csv", csv_content.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["invalid_count"] == 0
+    assert body["rows"][0]["normalized"]["importance"] == "high"
+    assert body["rows"][1]["normalized"]["importance"] == "low"
 
 
 def test_inventory_import_preview_reports_row_errors(client: TestClient) -> None:

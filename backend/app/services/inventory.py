@@ -85,7 +85,7 @@ from app.services.privacy import (
     normalize_privacy_level,
 )
 from app.services.audit import record_audit_log
-from app.services.dictionaries import require_active_dictionary_value
+from app.services.dictionaries import dictionary_label_map, require_active_dictionary_value
 
 try:
     from app.core.errors import not_found
@@ -1355,6 +1355,7 @@ CSV_EXPORT_COLUMNS = [
     "status",
     "quantity",
     "unit",
+    "importance",
     "owner",
     "keeper",
     "residence",
@@ -1384,6 +1385,7 @@ def load_items_for_export(db: Session, payload: ItemExportRequest) -> list[Item]
 
 def export_items_csv(db: Session, payload: ItemExportRequest, include_sensitive: bool = True) -> str:
     items = load_items_for_export(db, payload)
+    importance_labels = dictionary_label_map(db, IMPORTANCE_GROUP)
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=CSV_EXPORT_COLUMNS, lineterminator="\n")
     writer.writeheader()
@@ -1398,6 +1400,7 @@ def export_items_csv(db: Session, payload: ItemExportRequest, include_sensitive:
                 "status": detail.status_name,
                 "quantity": detail.quantity,
                 "unit": detail.unit,
+                "importance": importance_labels.get(detail.importance, detail.importance),
                 "owner": detail.owner_member_name or "",
                 "keeper": detail.keeper_member_name or "",
                 "residence": detail.residence_name or "",

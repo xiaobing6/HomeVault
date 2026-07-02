@@ -14,7 +14,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import bad_request
-from app.models.configuration import AttributeDefinition, Category, FamilyMember, ItemStatus, LocationNode, Residence
+from app.models.configuration import (
+    AttributeDefinition,
+    Category,
+    DictionaryGroup,
+    DictionaryOption,
+    FamilyMember,
+    ItemStatus,
+    LocationNode,
+    Residence,
+)
 from app.models.inventory import Item
 from app.schemas.inventory import (
     ImportConfirmResponse,
@@ -39,6 +48,7 @@ STATIC_IMPORT_COLUMNS = [
     "status",
     "quantity",
     "unit",
+    "importance",
     "owner",
     "keeper",
     "residence",
@@ -204,6 +214,7 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
     quantity = parse_quantity(original.get("quantity", ""), errors)
     is_container = parse_bool(original.get("is_container", ""), "is_container", errors, default=False)
     privacy_level = parse_privacy_level(original.get("privacy_level", ""), errors)
+    importance = parse_importance(db, original.get("importance", ""), errors)
     owner = resolve_member(db, original.get("owner", ""), "owner", errors)
     keeper = resolve_member(db, original.get("keeper", ""), "keeper", errors)
     residence = resolve_residence(db, original.get("residence", ""), errors)
@@ -245,6 +256,7 @@ def build_row_preview(db: Session, row_number: int, original: dict[str, str]) ->
             "container_item_id": container.id if container is not None else None,
             "is_container": is_container,
             "privacy_level": privacy_level,
+            "importance": importance,
             "attribute_values": [value.model_dump() for value in attribute_values],
             "tags": tags,
         }
@@ -440,6 +452,27 @@ def parse_privacy_level(raw_value: str, errors: list[ImportFieldMessage]) -> str
         return value
     errors.append(field_error("privacy_level", "隐私级别不正确"))
     return "normal"
+
+
+def parse_importance(db: Session, raw_value: str, errors: list[ImportFieldMessage]) -> str:
+    value = raw_value.strip()
+    if value == "":
+        return "medium"
+    option = db.scalar(
+        select(DictionaryOption)
+        .join(DictionaryGroup)
+        .where(
+            DictionaryGroup.code == "importance",
+            DictionaryGroup.is_active.is_(True),
+            DictionaryOption.is_active.is_(True),
+            or_(DictionaryOption.value == value, DictionaryOption.label == value),
+        )
+        .order_by(DictionaryOption.sort_order, DictionaryOption.id)
+    )
+    if option is None:
+        errors.append(field_error("importance", "\u91cd\u8981\u7a0b\u5ea6\u4e0d\u6b63\u786e"))
+        return "medium"
+    return option.value
 
 
 def parse_tags(raw_value: str) -> list[str]:
