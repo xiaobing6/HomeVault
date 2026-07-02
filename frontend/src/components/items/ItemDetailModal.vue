@@ -241,7 +241,7 @@ function quantityText(row: ItemQuantityChange): string {
                 <el-descriptions-item label="分类">{{ item.category_name || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="状态">{{ item.status_name || '-' }}</el-descriptions-item>
                 <el-descriptions-item label="数量">{{ item.quantity }} {{ item.unit }}</el-descriptions-item>
-                <el-descriptions-item label="Importance">{{ importanceLabel }}</el-descriptions-item>
+                <el-descriptions-item label="重要程度">{{ importanceLabel }}</el-descriptions-item>
                 <el-descriptions-item label="位置">{{ placementText }}</el-descriptions-item>
                 <el-descriptions-item label="容器">
                   {{ item.is_container ? '是' : '否' }}

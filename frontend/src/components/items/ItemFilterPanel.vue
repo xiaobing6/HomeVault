@@ -184,7 +184,7 @@ async function resetFilters() {
     <section class="filter-section">
       <div class="section-title">
         <el-icon><Location /></el-icon>
-        <span>Importance</span>
+        <span>重要程度</span>
       </div>
       <el-select v-model="importanceValue" clearable class="full-width">
         <el-option

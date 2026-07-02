@@ -78,7 +78,7 @@ watch(
     <el-table-column label="数量" width="108">
       <template #default="{ row }">{{ row.quantity }} {{ row.unit }}</template>
     </el-table-column>
-    <el-table-column label="Importance" width="96">
+    <el-table-column label="重要程度" width="96">
       <template #default="{ row }">{{ importanceLabel(row.importance) }}</template>
     </el-table-column>
     <el-table-column label="保管人" min-width="120" show-overflow-tooltip>

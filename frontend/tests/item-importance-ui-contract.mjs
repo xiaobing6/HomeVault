@@ -24,6 +24,7 @@ const itemFormDrawer = readSource('src/components/items/ItemFormDrawer.vue')
 const itemDetailModal = readSource('src/components/items/ItemDetailModal.vue')
 const itemTable = readSource('src/components/items/ItemTable.vue')
 const itemFilterPanel = readSource('src/components/items/ItemFilterPanel.vue')
+const visibleImportanceSources = [itemFormDrawer, itemDetailModal, itemTable, itemFilterPanel].join('\n')
 
 const itemSummary = readInterfaceBlock(inventoryApi, 'ItemSummary')
 const itemFilters = readInterfaceBlock(inventoryApi, 'ItemFilters')
@@ -112,6 +113,11 @@ assert.match(
   'Item form should show a clear missing importance error'
 )
 assert.match(itemFormDrawer, /label="重要程度"/, 'Item form should label importance in Chinese')
+assert.doesNotMatch(
+  visibleImportanceSources,
+  /(?:label="Importance"|<span>Importance<\/span>)/,
+  'Visible item importance labels should not be English'
+)
 assert.match(itemDetailModal, /importanceLabel/, 'Item detail should render an importance label')
 assert.match(itemTable, /row\.importance/, 'Item table should render item importance')
 assert.match(itemFilterPanel, /importanceValue/, 'Item filter panel should expose importance filtering')
