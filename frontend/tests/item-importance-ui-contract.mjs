@@ -36,6 +36,82 @@ assert.match(itemCreateRequest, /importance\?:\s*string/, 'Inventory create payl
 assert.match(itemUpdateRequest, /importance\?:\s*string/, 'Inventory update payload should accept importance')
 assert.match(itemFormDrawer, /importanceOptions/, 'Item form should compute importance dictionary options')
 assert.match(itemFormDrawer, /v-model="form\.importance"/, 'Item form should bind importance select')
+assert.match(
+  itemFormDrawer,
+  /function buildCreatePayload[\s\S]*importance:\s*form\.importance/,
+  'Item create payload should submit form importance'
+)
+assert.match(
+  itemFormDrawer,
+  /function buildUpdatePayload[\s\S]*importance:\s*form\.importance/,
+  'Item update payload should submit form importance'
+)
+assert.match(
+  itemFormDrawer,
+  /dictionaryOptions\(data\.value,\s*'importance',\s*true\)/,
+  'Item form should read inactive importance dictionary options for historical values'
+)
+assert.match(
+  itemFormDrawer,
+  /currentImportanceOption/,
+  'Item form should compute the current historical importance option'
+)
+assert.match(
+  itemFormDrawer,
+  /allImportanceOptions\.value\.find\(\(option\) => option\.value === value\)/,
+  'Item form should look up inactive importance labels for the current value'
+)
+assert.match(
+  itemFormDrawer,
+  /if \(dictionaryOption\) return \{ \.\.\.dictionaryOption, disabled: true \}/,
+  'Item form should show inactive dictionary values as disabled options'
+)
+assert.match(
+  itemFormDrawer,
+  /label:\s*value[\s\S]*disabled:\s*true/,
+  'Item form should show unknown historical importance values as disabled raw values'
+)
+assert.match(
+  itemFormDrawer,
+  /importanceSelectOptions/,
+  'Item form should merge the current historical importance into select options'
+)
+assert.match(
+  itemFormDrawer,
+  /:disabled="option\.disabled"/,
+  'Item form should prevent selecting inactive historical importance values'
+)
+assert.match(
+  itemFormDrawer,
+  /function defaultImportanceValue\(\)/,
+  'Item form should centralize active importance defaults'
+)
+assert.match(
+  itemFormDrawer,
+  /option\.value === 'medium'[\s\S]*importanceOptions\.value\[0\]\?\.value[\s\S]*\?\? ''/,
+  'Item form should default create importance to active medium, then first active option, then empty'
+)
+assert.match(
+  itemFormDrawer,
+  /importance:\s*defaultImportanceValue\(\)/,
+  'Item create reset should use active importance defaults only'
+)
+assert.match(
+  itemFormDrawer,
+  /function validateImportance\(\): boolean/,
+  'Item form should validate importance before save'
+)
+assert.match(
+  itemFormDrawer,
+  /if \(!form\.importance\)/,
+  'Item form should block save when importance is empty'
+)
+assert.match(
+  itemFormDrawer,
+  /ElMessage\.error\('请选择重要程度'\)/,
+  'Item form should show a clear missing importance error'
+)
+assert.match(itemFormDrawer, /label="重要程度"/, 'Item form should label importance in Chinese')
 assert.match(itemDetailModal, /importanceLabel/, 'Item detail should render an importance label')
 assert.match(itemTable, /row\.importance/, 'Item table should render item importance')
 assert.match(itemFilterPanel, /importanceValue/, 'Item filter panel should expose importance filtering')

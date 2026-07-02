@@ -28,6 +28,10 @@ interface OptionItem {
   value: number
 }
 
+interface ImportanceOption extends DictionaryOption {
+  disabled?: boolean
+}
+
 interface ItemFormModel {
   name: string
   description: string
@@ -121,6 +125,30 @@ const unitOptions = computed<DictionaryOption[]>(() => {
     .sort((left, right) => left.sort_order - right.sort_order || left.id - right.id)
 })
 const importanceOptions = computed(() => dictionaryOptions(data.value, 'importance'))
+const allImportanceOptions = computed(() => dictionaryOptions(data.value, 'importance', true))
+const currentImportanceOption = computed<ImportanceOption | null>(() => {
+  const value = form.importance
+  if (!isEditing.value || !value) return null
+  if (importanceOptions.value.some((option) => option.value === value)) return null
+
+  const dictionaryOption = allImportanceOptions.value.find((option) => option.value === value)
+  if (dictionaryOption) return { ...dictionaryOption, disabled: true }
+
+  return {
+    id: -1,
+    group_id: -1,
+    label: value,
+    value,
+    sort_order: 0,
+    is_active: false,
+    disabled: true
+  }
+})
+const importanceSelectOptions = computed<ImportanceOption[]>(() => {
+  const options = importanceOptions.value.map((option) => ({ ...option }))
+  if (currentImportanceOption.value) options.push(currentImportanceOption.value)
+  return options
+})
 const locationOptions = computed<OptionItem[]>(() => {
   const residenceNameById = new Map((data.value?.residences ?? []).map((residence) => [
     residence.id,
@@ -169,6 +197,17 @@ watch(
 )
 
 watch(
+  importanceOptions,
+  () => {
+    if (!props.modelValue || isEditing.value) return
+    if (form.importance && importanceOptions.value.some((option) => option.value === form.importance)) {
+      return
+    }
+    form.importance = defaultImportanceValue()
+  }
+)
+
+watch(
   placementType,
   (type) => {
     if (type === 'location') {
@@ -207,7 +246,7 @@ function createEmptyForm(): ItemFormModel {
     status_id: null,
     quantity: 1,
     unit: '件',
-    importance: 'medium',
+    importance: '',
     owner_member_id: null,
     keeper_member_id: null,
     location_node_id: null,
@@ -233,7 +272,7 @@ function resetForm() {
       status_id: item.status_id,
       quantity: Number(item.quantity),
       unit: item.unit || '件',
-      importance: item.importance || 'medium',
+      importance: item.importance || defaultImportanceValue(),
       owner_member_id: item.owner_member_id,
       keeper_member_id: item.keeper_member_id,
       location_node_id: item.location_node_id,
@@ -250,9 +289,7 @@ function resetForm() {
     Object.assign(form, createEmptyForm(), {
       status_id: defaultStatus.value?.id ?? null,
       unit: unitOptions.value[0]?.value || '件',
-      importance: importanceOptions.value.find((option) => option.value === 'medium')?.value
-        ?? importanceOptions.value[0]?.value
-        ?? 'medium'
+      importance: defaultImportanceValue()
     })
     attributeValues.value = {}
     placementType.value = 'location'
@@ -313,6 +350,12 @@ function parseTags(): string[] {
   return [...new Set(tags)]
 }
 
+function defaultImportanceValue() {
+  return importanceOptions.value.find((option) => option.value === 'medium')?.value
+    ?? importanceOptions.value[0]?.value
+    ?? ''
+}
+
 function validateStep(step: number, requireAttachment = true): boolean {
   if (step === 0) return validateCategory()
   if (step === 1) return validateBasicInfo()
@@ -350,8 +393,17 @@ function validateBasicInfo(): boolean {
     ElMessage.warning('请输入单位')
     return false
   }
+  if (!validateImportance()) return false
   if (!isEditing.value && (form.quantity == null || !Number.isFinite(form.quantity))) {
     ElMessage.warning('请输入初始数量')
+    return false
+  }
+  return true
+}
+
+function validateImportance(): boolean {
+  if (!form.importance) {
+    ElMessage.error('请选择重要程度')
     return false
   }
   return true
@@ -657,13 +709,14 @@ function closeDrawer() {
               </el-select>
             </el-form-item>
 
-            <el-form-item label="Importance">
+            <el-form-item label="重要程度">
               <el-select v-model="form.importance" class="full-width">
                 <el-option
-                  v-for="option in importanceOptions"
+                  v-for="option in importanceSelectOptions"
                   :key="option.value"
                   :label="option.label"
                   :value="option.value"
+                  :disabled="option.disabled"
                 />
               </el-select>
             </el-form-item>
