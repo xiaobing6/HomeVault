@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_permission
@@ -40,6 +41,8 @@ from app.services.configuration import (
     create_item_status as create_item_status_record,
     create_location_node as create_location_node_record,
     create_residence as create_residence_record,
+    build_residence_response,
+    get_residence_image_file,
     get_config_bootstrap,
     list_category_tree,
     list_dictionary_groups,
@@ -47,6 +50,7 @@ from app.services.configuration import (
     list_item_statuses,
     list_location_tree,
     list_residences,
+    replace_residence_image,
     update_attribute_definition as update_attribute_definition_record,
     update_attribute_option as update_attribute_option_record,
     update_category as update_category_record,
@@ -74,7 +78,7 @@ def residences(
     db: Session = Depends(get_db),
     user: User = Depends(require_permission("items:view")),
 ) -> list[ResidenceResponse]:
-    return [ResidenceResponse.model_validate(residence) for residence in list_residences(db)]
+    return [build_residence_response(residence) for residence in list_residences(db)]
 
 
 @router.get("/location-tree", response_model=list[LocationNodeResponse])
@@ -151,6 +155,31 @@ def update_residence(
     user: User = Depends(require_permission("config:manage")),
 ) -> ResidenceResponse:
     return update_residence_record(db, residence_id, payload, actor=user)
+
+
+@router.post("/residences/{residence_id}/image", response_model=ResidenceResponse)
+async def upload_residence_image(
+    residence_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("config:manage")),
+) -> ResidenceResponse:
+    return await replace_residence_image(db, residence_id, file, actor=user)
+
+
+@router.get("/residences/{residence_id}/image/file")
+def download_residence_image(
+    residence_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("items:view")),
+) -> FileResponse:
+    media_file = get_residence_image_file(db, residence_id)
+    return FileResponse(
+        media_file.path,
+        media_type=media_file.content_type,
+        filename=media_file.filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.post("/location-nodes", response_model=LocationNodeResponse, status_code=status.HTTP_201_CREATED)

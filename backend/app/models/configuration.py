@@ -56,7 +56,12 @@ class Residence(Base):
     name: Mapped[str] = mapped_column(String(120), index=True, nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     address: Mapped[str] = mapped_column(String(255), default="", nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    image_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    image_original_filename: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    image_content_type: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    image_byte_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -67,6 +72,8 @@ class Residence(Base):
     )
 
     home_space: Mapped[HomeSpace] = relationship(back_populates="residences", lazy="selectin")
+    created_by: Mapped[object | None] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
+    updated_by: Mapped[object | None] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
     location_nodes: Mapped[list[LocationNode]] = relationship(
         back_populates="residence",
         cascade="all, delete-orphan",

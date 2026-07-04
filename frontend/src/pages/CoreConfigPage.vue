@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 
 import { getChineseErrorMessage } from '../api/client'
 import CategoryFieldPanel from '../components/config/CategoryFieldPanel.vue'
@@ -13,8 +14,13 @@ import { useConfigurationStore } from '../stores/configuration'
 
 const auth = useAuthStore()
 const configuration = useConfigurationStore()
+const route = useRoute()
 const { loading } = storeToRefs(configuration)
 const canReadConfig = auth.hasPermission('items:view')
+const sectionNames = ['residence-location', 'family-members', 'category-fields', 'status-dictionaries'] as const
+type SectionName = typeof sectionNames[number]
+
+const activeSection = computed(() => normalizeSection(route.query.section))
 
 onMounted(async () => {
   if (!canReadConfig) return
@@ -25,12 +31,16 @@ onMounted(async () => {
     ElMessage.error(getChineseErrorMessage(error))
   }
 })
+
+function normalizeSection(section: unknown): SectionName {
+  return typeof section === 'string' && sectionNames.includes(section as SectionName)
+    ? section as SectionName
+    : 'residence-location'
+}
 </script>
 
 <template>
   <section class="core-config-page" v-loading="loading">
-    <h1 class="page-title">核心配置</h1>
-
     <el-alert
       v-if="!canReadConfig"
       title="缺少物品查看权限，无法读取核心配置。"
@@ -39,34 +49,18 @@ onMounted(async () => {
       :closable="false"
     />
 
-    <el-tabs v-else class="config-tabs">
-      <el-tab-pane label="住宅与位置">
-        <ResidenceLocationPanel />
-      </el-tab-pane>
-      <el-tab-pane label="家庭成员">
-        <FamilyMemberPanel />
-      </el-tab-pane>
-      <el-tab-pane label="分类字段">
-        <CategoryFieldPanel />
-      </el-tab-pane>
-      <el-tab-pane label="状态与字典">
-        <DictionaryPanel />
-      </el-tab-pane>
-    </el-tabs>
+    <template v-else>
+      <ResidenceLocationPanel v-if="activeSection === 'residence-location'" />
+      <FamilyMemberPanel v-else-if="activeSection === 'family-members'" />
+      <CategoryFieldPanel v-else-if="activeSection === 'category-fields'" />
+      <DictionaryPanel v-else-if="activeSection === 'status-dictionaries'" />
+    </template>
   </section>
 </template>
 
 <style scoped>
 .core-config-page {
-  display: grid;
-  gap: 18px;
-}
-
-.config-tabs {
   min-width: 0;
-}
-
-.config-tabs :deep(.el-tabs__content) {
-  overflow: visible;
+  width: 100%;
 }
 </style>

@@ -53,7 +53,7 @@ def seed_user(db: Session, username: str, password: str, role_code: str) -> User
 def seed_inventory_config(db: Session) -> None:
     home = db.scalar(select(HomeSpace).order_by(HomeSpace.id))
     assert home is not None
-    residence = Residence(name="Main residence", home_space=home, sort_order=10)
+    residence = Residence(name="Main residence", home_space=home)
     shelf = LocationNode(residence=residence, name="Shelf", node_type="shelf", sort_order=10)
     member = FamilyMember(home_space=home, name="Alex", relation="Owner")
     category = Category(code="documents", name="Documents", sort_order=10)

@@ -64,6 +64,10 @@ def protected_attachment_download_url(item_id: int, attachment_id: int) -> str:
     return f"/api/items/{item_id}/attachments/{attachment_id}/download"
 
 
+def protected_residence_image_url(residence_id: int) -> str:
+    return f"/api/config/residences/{residence_id}/image/file"
+
+
 async def validate_image_signature(upload: UploadFile, content_type: str) -> None:
     prefix = await upload.read(16)
     await upload.seek(0)
@@ -114,7 +118,13 @@ async def validate_attachment_signature(upload: UploadFile, content_type: str) -
     raise bad_request("Attachment type is not supported")
 
 
-async def store_upload(upload: UploadFile, *, item_id: int, media_type: str) -> tuple[str, int]:
+async def store_upload(
+    upload: UploadFile,
+    *,
+    item_id: int,
+    media_type: str,
+    resource_root: str = "items",
+) -> tuple[str, int]:
     limit = MAX_IMAGE_BYTES if media_type == "images" else MAX_ATTACHMENT_BYTES
     content = await upload.read(limit + 1)
     byte_size = len(content)
@@ -122,7 +132,7 @@ async def store_upload(upload: UploadFile, *, item_id: int, media_type: str) -> 
         raise bad_request("Upload file is too large")
 
     stored_filename = build_storage_name(upload.filename)
-    relative_dir = Path("items") / str(item_id) / media_type
+    relative_dir = Path(resource_root) / str(item_id) / media_type
     storage_dir = stored_upload_path(relative_dir.as_posix())
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / stored_filename).write_bytes(content)

@@ -17,6 +17,7 @@ import {
   updateItemStatusApi,
   updateLocationNodeApi,
   updateResidenceApi,
+  uploadResidenceImageApi,
   type AttributeDefinitionCreate,
   type AttributeDefinitionUpdate,
   type AttributeOptionCreate,
@@ -52,12 +53,19 @@ export const useConfigurationStore = defineStore('configuration', {
       }
     },
     async createResidence(payload: ResidenceCreate) {
-      await createResidenceApi(payload)
+      const residence = await createResidenceApi(payload)
       await this.load()
+      return residence
     },
     async updateResidence(residenceId: number, payload: ResidenceUpdate) {
-      await updateResidenceApi(residenceId, payload)
+      const residence = await updateResidenceApi(residenceId, payload)
       await this.load()
+      return residence
+    },
+    async uploadResidenceImage(residenceId: number, file: File) {
+      const residence = await uploadResidenceImageApi(residenceId, file)
+      await this.load()
+      return residence
     },
     async createLocationNode(payload: LocationNodeCreate) {
       await createLocationNodeApi(payload)

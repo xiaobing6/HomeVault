@@ -85,8 +85,8 @@ def _insert_residence(connection, home_space_id: int, name: str, is_active: bool
     connection.execute(
         text(
             "INSERT INTO residences "
-            "(home_space_id, name, description, address, sort_order, is_active, created_at, updated_at) "
-            "VALUES (:home_space_id, :name, '', '', 0, :is_active, :created_at, :updated_at)"
+            "(home_space_id, name, description, address, is_active, created_at, updated_at) "
+            "VALUES (:home_space_id, :name, '', '', :is_active, :created_at, :updated_at)"
         ),
         {
             "home_space_id": home_space_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,21 +43,31 @@ class ResidenceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=255)
     address: str = Field(default="", max_length=255)
-    sort_order: int = 0
 
 
 class ResidenceUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=255)
     address: str = Field(default="", max_length=255)
-    sort_order: int = 0
     is_active: bool = True
 
 
-class ResidenceResponse(ResidenceUpdate):
+class ResidenceResponse(ResponseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    name: str
+    description: str
+    address: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    created_by_id: int | None = None
+    created_by_name: str | None = None
+    updated_by_id: int | None = None
+    updated_by_name: str | None = None
+    image_url: str | None = None
+    image_original_filename: str | None = None
 
 
 class LocationNodeCreate(BaseModel):

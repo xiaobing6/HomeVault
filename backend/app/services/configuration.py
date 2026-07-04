@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.errors import bad_request
+from app.core.errors import bad_request, not_found
 from app.models.auth import User
 from app.models.configuration import (
     AttributeDefinition,
@@ -52,6 +54,14 @@ from app.schemas.configuration import (
 from app.services.audit import record_audit_log
 from app.services.dictionaries import require_active_dictionary_value
 from app.services.privacy import normalize_privacy_level
+from app.services.uploads import (
+    IMAGE_CONTENT_TYPES,
+    delete_stored_upload,
+    protected_residence_image_url,
+    store_upload,
+    stored_upload_path,
+    validate_image_signature,
+)
 
 HOME_SPACE_NAME = "我们家"
 
@@ -125,6 +135,13 @@ class CoreConfigurationSeedResult:
     home_space: HomeSpace
     item_statuses: list[ItemStatus]
     dictionary_groups: list[DictionaryGroup]
+
+
+@dataclass(frozen=True)
+class MediaFile:
+    path: Path
+    filename: str
+    content_type: str
 
 
 def ensure_core_configuration_seed(db: Session) -> CoreConfigurationSeedResult:
@@ -229,9 +246,39 @@ def list_residences(db: Session) -> list[Residence]:
     return list(
         db.scalars(
             select(Residence)
-            .options(selectinload(Residence.location_nodes))
-            .order_by(Residence.sort_order, Residence.id)
+            .options(
+                selectinload(Residence.location_nodes),
+                selectinload(Residence.created_by),
+                selectinload(Residence.updated_by),
+            )
+            .order_by(Residence.updated_at.desc(), Residence.id.desc())
         ).all()
+    )
+
+
+def user_display_name(user: object | None) -> str | None:
+    if user is None:
+        return None
+    display_name = getattr(user, "display_name", "")
+    username = getattr(user, "username", "")
+    return display_name or username or None
+
+
+def build_residence_response(residence: Residence) -> ResidenceResponse:
+    return ResidenceResponse(
+        id=residence.id,
+        name=residence.name,
+        description=residence.description,
+        address=residence.address,
+        is_active=residence.is_active,
+        created_at=residence.created_at,
+        updated_at=residence.updated_at,
+        created_by_id=residence.created_by_id,
+        created_by_name=user_display_name(residence.created_by),
+        updated_by_id=residence.updated_by_id,
+        updated_by_name=user_display_name(residence.updated_by),
+        image_url=protected_residence_image_url(residence.id) if residence.image_path else None,
+        image_original_filename=residence.image_original_filename or None,
     )
 
 
@@ -456,7 +503,7 @@ def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
 
     return ConfigBootstrapResponse(
         home_space=HomeSpaceResponse.model_validate(home_space),
-        residences=[ResidenceResponse.model_validate(residence) for residence in residences],
+        residences=[build_residence_response(residence) for residence in residences],
         location_tree=build_location_tree(list(location_nodes)),
         family_members=[FamilyMemberResponse.model_validate(member) for member in family_members],
         categories=build_category_tree(list(categories)),
@@ -481,7 +528,8 @@ def create_residence(
         name=payload.name,
         description=payload.description,
         address=payload.address,
-        sort_order=payload.sort_order,
+        created_by_id=actor.id if actor is not None else None,
+        updated_by_id=actor.id if actor is not None else None,
         is_active=True,
     )
     db.add(residence)
@@ -497,7 +545,7 @@ def create_residence(
     )
     commit_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
     db.refresh(residence)
-    return ResidenceResponse.model_validate(residence)
+    return build_residence_response(residence)
 
 
 def create_location_node(
@@ -677,7 +725,7 @@ def update_residence(
     residence.name = payload.name
     residence.description = payload.description
     residence.address = payload.address
-    residence.sort_order = payload.sort_order
+    residence.updated_by_id = actor.id if actor is not None else None
     residence.is_active = payload.is_active
     record_audit_log(
         db,
@@ -690,7 +738,83 @@ def update_residence(
     )
     commit_or_bad_request(db, ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE)
     db.refresh(residence)
-    return ResidenceResponse.model_validate(residence)
+    return build_residence_response(residence)
+
+
+def stored_media_file(relative_path: str) -> Path:
+    root = stored_upload_path("").resolve()
+    path = stored_upload_path(relative_path).resolve()
+    if path != root and root not in path.parents:
+        raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
+    if not path.is_file():
+        raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
+    return path
+
+
+def get_residence_image_file(db: Session, residence_id: int) -> MediaFile:
+    residence = db.get(Residence, residence_id)
+    if residence is None or not residence.image_path:
+        raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
+    return MediaFile(
+        path=stored_media_file(residence.image_path),
+        filename=residence.image_original_filename,
+        content_type=residence.image_content_type,
+    )
+
+
+async def replace_residence_image(
+    db: Session,
+    residence_id: int,
+    upload: UploadFile,
+    actor: User | None = None,
+) -> ResidenceResponse:
+    residence = db.get(Residence, residence_id)
+    if residence is None:
+        raise not_found("\u4f4f\u5b85\u4e0d\u5b58\u5728")
+
+    content_type = upload.content_type or ""
+    if content_type not in IMAGE_CONTENT_TYPES:
+        raise bad_request("\u56fe\u7247\u683c\u5f0f\u4e0d\u652f\u6301")
+    await validate_image_signature(upload, content_type)
+
+    old_image_path = residence.image_path
+    file_path = ""
+    try:
+        file_path, byte_size = await store_upload(
+            upload,
+            item_id=residence.id,
+            media_type="images",
+            resource_root="residences",
+        )
+        residence.image_path = file_path
+        residence.image_original_filename = upload.filename or ""
+        residence.image_content_type = content_type
+        residence.image_byte_size = byte_size
+        residence.updated_by_id = actor.id if actor is not None else None
+        record_audit_log(
+            db,
+            action="config.residence.image.update",
+            resource_type="residence",
+            actor=actor,
+            resource_id=residence.id,
+            resource_label=residence.name,
+            metadata={"image_original_filename": residence.image_original_filename},
+        )
+        commit_or_bad_request(db, "\u56fe\u7247\u4fdd\u5b58\u5931\u8d25")
+    except HTTPException:
+        if file_path:
+            delete_stored_upload(file_path)
+        raise
+    except SQLAlchemyError as exc:
+        db.rollback()
+        if file_path:
+            delete_stored_upload(file_path)
+        raise bad_request("\u56fe\u7247\u4fdd\u5b58\u5931\u8d25") from exc
+
+    if old_image_path and old_image_path != file_path:
+        delete_stored_upload(old_image_path)
+    db.refresh(residence)
+    return build_residence_response(residence)
 
 
 def update_location_node(

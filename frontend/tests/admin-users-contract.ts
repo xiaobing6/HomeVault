@@ -83,7 +83,6 @@ const residenceUpdatePayload: ResidenceUpdate = {
   name: 'Main Home',
   description: 'Primary residence',
   address: '123 Garden Road',
-  sort_order: 10,
   is_active: false
 }
 

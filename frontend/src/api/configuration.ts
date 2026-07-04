@@ -27,8 +27,15 @@ export interface Residence {
   name: string
   description: string
   address: string
-  sort_order: number
   is_active: boolean
+  created_at: string
+  updated_at: string
+  created_by_id: number | null
+  created_by_name: string | null
+  updated_by_id: number | null
+  updated_by_name: string | null
+  image_url: string | null
+  image_original_filename: string | null
 }
 
 export interface LocationNode {
@@ -138,14 +145,12 @@ export interface ResidenceCreate {
   name: string
   description?: string
   address?: string
-  sort_order?: number
 }
 
 export interface ResidenceUpdate {
   name: string
   description: string
   address: string
-  sort_order: number
   is_active: boolean
 }
 
@@ -265,6 +270,13 @@ export async function updateResidenceApi(
   payload: ResidenceUpdate
 ): Promise<Residence> {
   const response = await apiClient.patch<Residence>(`/config/residences/${residenceId}`, payload)
+  return response.data
+}
+
+export async function uploadResidenceImageApi(residenceId: number, file: File): Promise<Residence> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await apiClient.post<Residence>(`/config/residences/${residenceId}/image`, formData)
   return response.data
 }
 

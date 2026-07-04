@@ -258,13 +258,13 @@ assert.match(
 )
 assert.match(
   residenceLocationPanel,
-  /<el-table-column\s+prop="is_active"[\s\S]*<el-tag[\s\S]*row\.is_active/s,
-  'Residence table should show active/inactive state with a tag'
+  /selectedResidenceDetail\.is_active|residence\.is_active/s,
+  'Residence cards or details should show active/inactive state'
 )
 assert.match(
   residenceLocationPanel,
-  /openResidenceEdit\(row\)/,
-  'Residence table should provide an edit action'
+  /openResidenceEdit\(selectedResidenceDetail\)|openResidenceEdit\(residence\)/,
+  'Residence cards or details should provide an edit action'
 )
 assert.match(
   residenceLocationPanel,

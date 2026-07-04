@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models import AuditLog
 from app.models.auth import Role, User
-from app.models.configuration import AttributeDefinition, AttributeOption, DictionaryOption
+from app.models.configuration import AttributeDefinition, AttributeOption, DictionaryOption, Residence
 from app.services.seed import seed_auth_baseline
 
 
@@ -32,6 +33,68 @@ def login(client: TestClient, username: str = "admin", password: str = "ChangeMe
     response = client.post("/api/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+
+def test_residence_payloads_include_audit_metadata_image_and_updated_order(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+
+    first = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "First home", "description": "", "address": ""},
+    )
+    second = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Second home", "description": "", "address": ""},
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    assert first.json()["is_active"] is True
+
+    first_row = db_session.get(Residence, first.json()["id"])
+    second_row = db_session.get(Residence, second.json()["id"])
+    assert first_row is not None
+    assert second_row is not None
+    first_row.updated_at = datetime.now(timezone.utc) - timedelta(days=1)
+    second_row.updated_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    upload = client.post(
+        f"/api/config/residences/{second.json()['id']}/image",
+        headers=headers,
+        files={"file": ("front.png", PNG_BYTES, "image/png")},
+    )
+    assert upload.status_code == 200
+    assert upload.json()["image_url"] == f"/api/config/residences/{second.json()['id']}/image/file"
+    assert upload.json()["image_original_filename"] == "front.png"
+    assert "sort_order" not in upload.json()
+
+    image_file = client.get(upload.json()["image_url"], headers=headers)
+    assert image_file.status_code == 200
+    assert image_file.content == PNG_BYTES
+
+    replacement = client.post(
+        f"/api/config/residences/{second.json()['id']}/image",
+        headers=headers,
+        files={"file": ("replace.webp", b"RIFFxxxxWEBPpayload", "image/webp")},
+    )
+    assert replacement.status_code == 200
+    assert replacement.json()["image_original_filename"] == "replace.webp"
+
+    residences = client.get("/api/config/residences", headers=headers)
+    assert residences.status_code == 200
+    body = residences.json()
+    assert [residence["name"] for residence in body] == ["Second home", "First home"]
+    assert "sort_order" not in body[0]
+    for field in ["created_at", "updated_at", "created_by_id", "created_by_name", "updated_by_id", "updated_by_name"]:
+        assert body[0][field]
 
 
 def test_configuration_mutations_write_audit_logs(

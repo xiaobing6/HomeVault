@@ -79,7 +79,7 @@ def seed_user(db: Session, username: str, password: str, role_code: str) -> User
 def seed_inventory_config(db: Session) -> None:
     home = db.scalar(select(HomeSpace).order_by(HomeSpace.id))
     assert home is not None
-    residence = Residence(name="Main residence", home_space=home, sort_order=10)
+    residence = Residence(name="Main residence", home_space=home)
     shelf = LocationNode(residence=residence, name="Shelf", node_type="shelf", sort_order=10)
     drawer = LocationNode(residence=residence, name="Drawer", node_type="drawer", sort_order=20)
     member = FamilyMember(home_space=home, name="Alex", relation="Owner")
@@ -857,7 +857,7 @@ def test_inventory_import_preview_rejects_ambiguous_locations_without_residence(
     headers = login(client)
     home = db_session.scalar(select(HomeSpace).order_by(HomeSpace.id))
     assert home is not None
-    other_residence = Residence(name="Cabin", home_space=home, sort_order=20)
+    other_residence = Residence(name="Cabin", home_space=home)
     db_session.add(LocationNode(residence=other_residence, name="Shelf", node_type="shelf", sort_order=10))
     db_session.commit()
     content = "\n".join(
