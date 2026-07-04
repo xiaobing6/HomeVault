@@ -1,6 +1,9 @@
 import {
   createAttributeOptionApi,
   createItemStatusApi,
+  deleteFamilyMemberApi,
+  deleteLocationNodeApi,
+  deleteResidenceApi,
   updateAttributeDefinitionApi,
   updateAttributeOptionApi,
   updateCategoryApi,
@@ -23,7 +26,8 @@ import {
   type ItemStatusCreate,
   type ItemStatusUpdate,
   type LocationNode,
-  type LocationNodeUpdate
+  type LocationNodeUpdate,
+  type Residence
 } from '../src/api/configuration'
 import { useConfigurationStore } from '../src/stores/configuration'
 
@@ -99,7 +103,17 @@ const dictionaryPayload: DictionaryOptionUpdate = {
   is_active: false
 }
 
+declare const deletedResidence: Residence
+declare const deletedLocation: LocationNode
+declare const deletedMember: FamilyMember
+expectType<boolean>(deletedResidence.is_deleted)
+expectType<boolean>(deletedLocation.is_deleted)
+expectType<boolean>(deletedMember.is_deleted)
+
 async function assertConfigurationApiContract() {
+  expectType<Residence>(await deleteResidenceApi(1))
+  expectType<LocationNode>(await deleteLocationNodeApi(1))
+  expectType<FamilyMember>(await deleteFamilyMemberApi(1))
   expectType<LocationNode>(await updateLocationNodeApi(1, locationUpdatePayload))
   expectType<FamilyMember>(await updateFamilyMemberApi(1, memberUpdatePayload))
   expectType<Category>(await updateCategoryApi(1, categoryUpdatePayload))
@@ -114,6 +128,9 @@ async function assertConfigurationApiContract() {
 async function assertConfigurationStoreContract() {
   const configuration = useConfigurationStore()
 
+  await configuration.deleteResidence(1)
+  await configuration.deleteLocationNode(1)
+  await configuration.deleteFamilyMember(1)
   await configuration.updateLocationNode(1, locationUpdatePayload)
   await configuration.updateFamilyMember(1, memberUpdatePayload)
   await configuration.updateCategory(1, categoryUpdatePayload)

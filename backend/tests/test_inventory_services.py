@@ -888,6 +888,70 @@ def test_return_loan_without_target_status_requires_active_in_stock_status(
             item.id,
             loaned.loans[0].id,
             LoanReturn(location_node_id=inventory_seed["closet"].id),
-        )
+    )
 
     assert exc_info.value.status_code == 400
+
+
+def test_item_detail_response_includes_soft_delete_fields(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    item = create_item(db_session, make_create_payload(inventory_seed))
+
+    detail = get_item_detail(db_session, item.id)
+
+    assert detail.is_deleted is False
+    assert detail.deleted_at is None
+    assert detail.delete_reason == ""
+
+
+def test_delete_item_hides_from_lists_and_detail(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    from app.schemas.inventory import DeleteItemRequest
+    from app.services.inventory import delete_item
+
+    item = create_item(db_session, make_create_payload(inventory_seed, name="Delete me"))
+
+    deleted = delete_item(db_session, item.id, DeleteItemRequest(delete_reason="Duplicate"), actor_id=7)
+
+    assert deleted.is_deleted is True
+    assert deleted.delete_reason == "Duplicate"
+    assert deleted.deleted_at is not None
+    assert list_items(db_session, ItemListQuery(include_archived=True)).total == 0
+    with pytest.raises(HTTPException):
+        get_item_detail(db_session, item.id)
+
+
+def test_delete_item_blocks_children_and_active_loan(
+    db_session: Session,
+    inventory_seed: dict[str, object],
+) -> None:
+    from app.schemas.inventory import DeleteItemRequest
+    from app.services.inventory import delete_item
+
+    container = create_item(
+        db_session,
+        make_create_payload(inventory_seed, name="Container", is_container=True),
+    )
+    child_payload = make_create_payload(
+        inventory_seed,
+        name="Child",
+        location_node_id=None,
+        container_item_id=container.id,
+        is_container=False,
+    )
+    create_item(db_session, child_payload)
+
+    with pytest.raises(HTTPException) as child_exc:
+        delete_item(db_session, container.id, DeleteItemRequest())
+    assert "子物品" in str(child_exc.value.detail)
+
+    loaned = create_item(db_session, make_create_payload(inventory_seed, name="Loaned", is_container=False))
+    create_loan(db_session, loaned.id, LoanCreate(borrower_name="Friend"))
+
+    with pytest.raises(HTTPException) as loan_exc:
+        delete_item(db_session, loaned.id, DeleteItemRequest())
+    assert "借用" in str(loan_exc.value.detail)

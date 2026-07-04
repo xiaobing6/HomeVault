@@ -10,7 +10,7 @@ import type { BulkItemOperationResponse } from '../../api/inventory'
 import { useConfigurationStore } from '../../stores/configuration'
 import { useInventoryStore } from '../../stores/inventory'
 
-type BulkActionType = 'move' | 'status' | 'archive'
+type BulkActionType = 'move' | 'status' | 'archive' | 'delete'
 type PlacementType = 'location' | 'container'
 
 interface OptionItem {
@@ -55,10 +55,15 @@ const archiveForm = reactive({
   archive_reason: ''
 })
 
+const deleteForm = reactive({
+  delete_reason: ''
+})
+
 const dialogTitle = computed(() => {
   if (props.action === 'move') return '批量移动'
   if (props.action === 'status') return '批量修改状态'
   if (props.action === 'archive') return '批量归档'
+  if (props.action === 'delete') return '批量删除'
   return '批量操作'
 })
 
@@ -136,6 +141,7 @@ function resetForms() {
     note: ''
   })
   archiveForm.archive_reason = ''
+  deleteForm.delete_reason = ''
 }
 
 function flattenLocationNodes(node: LocationNode, prefix: string): OptionItem[] {
@@ -209,6 +215,12 @@ async function submitAction() {
         note: statusForm.note.trim()
       })
       ElMessage.success(`已更新 ${response.updated_count} 个物品`)
+    } else if (props.action === 'delete') {
+      response = await inventory.bulkDeleteItems({
+        item_ids: props.selectedItemIds,
+        delete_reason: deleteForm.delete_reason.trim()
+      })
+      ElMessage.success(`已删除 ${response.updated_count} 个物品`)
     } else {
       response = await inventory.bulkArchiveItems({
         item_ids: props.selectedItemIds,
@@ -304,6 +316,17 @@ async function submitAction() {
       <template v-else-if="action === 'archive'">
         <el-form-item label="归档原因">
           <el-input v-model="archiveForm.archive_reason" maxlength="255" show-word-limit />
+        </el-form-item>
+      </template>
+
+      <template v-else-if="action === 'delete'">
+        <el-alert
+          title="删除后，所选物品将从普通列表、导出和详情入口隐藏。"
+          type="warning"
+          :closable="false"
+        />
+        <el-form-item label="删除原因">
+          <el-input v-model="deleteForm.delete_reason" maxlength="255" show-word-limit />
         </el-form-item>
       </template>
     </el-form>

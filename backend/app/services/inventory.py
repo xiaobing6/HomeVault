@@ -38,9 +38,11 @@ from app.schemas.inventory import (
     ArchiveItemRequest,
     BulkArchiveItemsRequest,
     BulkChangeStatusRequest,
+    BulkDeleteItemsRequest,
     BulkItemOperationResponse,
     BulkMoveItemsRequest,
     ChangeStatusRequest,
+    DeleteItemRequest,
     ItemAttachmentResponse,
     ItemAttributeValueInput,
     ItemAttributeValueResponse,
@@ -126,13 +128,18 @@ def normalize_tag(name: str) -> str:
 
 def require_item(db: Session, item_id: int) -> Item:
     item = db.get(Item, item_id)
-    if item is None:
+    if item is None or item.is_deleted:
         raise not_found("\u7269\u54c1\u4e0d\u5b58\u5728")
     return item
 
 
 def require_items(db: Session, item_ids: list[int]) -> list[Item]:
-    items = db.scalars(select(Item).where(Item.id.in_(item_ids))).unique().all()
+    items = db.scalars(
+        select(Item).where(
+            Item.id.in_(item_ids),
+            Item.is_deleted.is_(False),
+        )
+    ).unique().all()
     item_by_id = {item.id: item for item in items}
     missing_ids = [item_id for item_id in item_ids if item_id not in item_by_id]
     if missing_ids:
@@ -143,7 +150,10 @@ def require_items(db: Session, item_ids: list[int]) -> list[Item]:
 def load_items_for_response(db: Session, item_ids: list[int]) -> list[Item]:
     items = db.scalars(
         select(Item)
-        .where(Item.id.in_(item_ids))
+        .where(
+            Item.id.in_(item_ids),
+            Item.is_deleted.is_(False),
+        )
         .options(*item_response_options())
     ).unique().all()
     item_by_id = {item.id: item for item in items}
@@ -193,7 +203,7 @@ def assert_member_exists(db: Session, member_id: int | None) -> None:
     if member_id is None:
         return
     member = db.get(FamilyMember, member_id)
-    if member is None or not member.is_active:
+    if member is None or not member.is_active or member.is_deleted:
         raise bad_request("\u5bb6\u5ead\u6210\u5458\u4e0d\u5b58\u5728")
 
 
@@ -216,7 +226,11 @@ def has_active_loan(db: Session, item_id: int) -> bool:
 def has_active_children(db: Session, item_id: int) -> bool:
     return db.scalar(
         select(Item.id)
-        .where(Item.container_item_id == item_id, Item.is_archived.is_(False))
+        .where(
+            Item.container_item_id == item_id,
+            Item.is_archived.is_(False),
+            Item.is_deleted.is_(False),
+        )
         .limit(1)
     ) is not None
 
@@ -271,14 +285,14 @@ def validate_basic_placement(
     container_item: Item | None = None
     if location_node_id is not None:
         location_node = db.get(LocationNode, location_node_id)
-        if location_node is None or not location_node.is_active:
+        if location_node is None or not location_node.is_active or location_node.is_deleted:
             raise bad_request("\u4f4d\u7f6e\u4e0d\u5b58\u5728")
 
     if container_item_id is not None:
         if current_item_id is not None and container_item_id == current_item_id:
             raise bad_request("\u4e0d\u80fd\u5c06\u7269\u54c1\u653e\u5165\u81ea\u5df1")
         container_item = db.get(Item, container_item_id)
-        if container_item is None or container_item.is_archived:
+        if container_item is None or container_item.is_archived or container_item.is_deleted:
             raise bad_request("\u5bb9\u5668\u4e0d\u5b58\u5728")
         if not container_item.is_container:
             raise bad_request("\u76ee\u6807\u7269\u54c1\u4e0d\u662f\u5bb9\u5668")
@@ -841,6 +855,42 @@ def archive_item(
     return get_item_detail(db, item_id, include_sensitive=include_sensitive)
 
 
+def assert_item_can_be_deleted(db: Session, item: Item) -> None:
+    if has_active_children(db, item.id):
+        raise bad_request("\u8bf7\u5148\u79fb\u52a8\u3001\u5f52\u6863\u6216\u5220\u9664\u5b50\u7269\u54c1")
+    if has_active_loan(db, item.id):
+        raise bad_request("\u7269\u54c1\u5b58\u5728\u672a\u5f52\u8fd8\u501f\u7528\u8bb0\u5f55\uff0c\u4e0d\u80fd\u5220\u9664")
+
+
+def delete_item(
+    db: Session,
+    item_id: int,
+    payload: DeleteItemRequest | None = None,
+    actor_id: int | None = None,
+    include_sensitive: bool = True,
+) -> ItemDetailResponse:
+    item = require_item(db, item_id)
+    assert_item_can_be_deleted(db, item)
+    delete_payload = payload or DeleteItemRequest()
+    item.is_deleted = True
+    item.delete_reason = delete_payload.delete_reason
+    item.deleted_at = utcnow()
+    item.deleted_by_id = actor_id
+    item.updated_by_id = actor_id
+    record_audit_log(
+        db,
+        action="inventory.item.delete",
+        resource_type="item",
+        actor_user_id=actor_id,
+        resource_id=item.id,
+        resource_label=item.name,
+        metadata={"delete_reason": item.delete_reason},
+    )
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    db.refresh(item)
+    return build_item_detail_response(item, include_sensitive=include_sensitive)
+
+
 def move_item(
     db: Session,
     item_id: int,
@@ -1034,6 +1084,42 @@ def bulk_archive_items(
         item.archive_reason = payload.archive_reason
         item.archived_at = archived_at
         item.updated_by_id = actor_id
+    commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
+    return BulkItemOperationResponse(updated_count=len(payload.item_ids), item_ids=payload.item_ids)
+
+
+def bulk_delete_items(
+    db: Session,
+    payload: BulkDeleteItemsRequest,
+    actor_id: int | None = None,
+) -> BulkItemOperationResponse:
+    items = require_items(db, payload.item_ids)
+    for item in items:
+        assert_item_can_be_deleted(db, item)
+
+    deleted_at = utcnow()
+    for item in items:
+        item.is_deleted = True
+        item.delete_reason = payload.delete_reason
+        item.deleted_at = deleted_at
+        item.deleted_by_id = actor_id
+        item.updated_by_id = actor_id
+        record_audit_log(
+            db,
+            action="inventory.item.delete",
+            resource_type="item",
+            actor_user_id=actor_id,
+            resource_id=item.id,
+            resource_label=item.name,
+            metadata={"delete_reason": item.delete_reason, "bulk": True},
+        )
+    record_audit_log(
+        db,
+        action="inventory.item.bulk_delete",
+        resource_type="item",
+        actor_user_id=actor_id,
+        metadata={"item_ids": payload.item_ids, "delete_reason": payload.delete_reason},
+    )
     commit_or_bad_request(db, "\u7269\u54c1\u4fdd\u5b58\u5931\u8d25")
     return BulkItemOperationResponse(updated_count=len(payload.item_ids), item_ids=payload.item_ids)
 
@@ -1232,7 +1318,7 @@ def matches_effective_location(item: Item, query: ItemListQuery) -> bool:
 
 
 def build_item_list_filter_statement(query: ItemListQuery):
-    stmt = select(Item)
+    stmt = select(Item).where(Item.is_deleted.is_(False))
     if not query.include_archived:
         stmt = stmt.where(Item.is_archived.is_(False))
     if query.category_id is not None:
@@ -1610,7 +1696,10 @@ def item_response_options() -> tuple:
 def load_item_for_response(db: Session, item_id: int) -> Item | None:
     return db.scalar(
         select(Item)
-        .where(Item.id == item_id)
+        .where(
+            Item.id == item_id,
+            Item.is_deleted.is_(False),
+        )
         .options(*item_response_options())
     )
 
@@ -1666,6 +1755,7 @@ def build_item_summary_response(item: Item, include_sensitive: bool = True) -> I
         is_container=item.is_container,
         privacy_level=normalize_privacy_level(item.privacy_level),
         is_archived=item.is_archived,
+        is_deleted=item.is_deleted,
         primary_image_url=(
             protected_image_url(item.id, primary_image.id)
             if primary_image is not None
@@ -1684,6 +1774,8 @@ def build_item_detail_response(item: Item, include_sensitive: bool = True) -> It
         **summary.model_dump(),
         archive_reason=redacted_if_sensitive(item.archive_reason, redact=not show_sensitive_data),
         archived_at=item.archived_at,
+        delete_reason=redacted_if_sensitive(item.delete_reason, redact=not show_sensitive_data),
+        deleted_at=item.deleted_at,
         created_by_id=item.created_by_id,
         updated_by_id=item.updated_by_id,
         attribute_values=build_attribute_value_responses(item, include_sensitive=include_sensitive),

@@ -128,6 +128,7 @@ export interface ItemSummary {
   is_container: boolean
   privacy_level: PrivacyLevel
   is_archived: boolean
+  is_deleted: boolean
   primary_image_url: string | null
   tags: Tag[]
   created_at: string
@@ -137,6 +138,8 @@ export interface ItemSummary {
 export interface ItemDetail extends ItemSummary {
   archive_reason: string
   archived_at: string | null
+  delete_reason: string
+  deleted_at: string | null
   created_by_id: number | null
   updated_by_id: number | null
   attribute_values: ItemAttributeValue[]
@@ -252,6 +255,10 @@ export interface ArchiveItemRequest {
   archive_reason?: string
 }
 
+export interface DeleteItemRequest {
+  delete_reason?: string
+}
+
 export interface BulkItemOperationResponse {
   updated_count: number
   item_ids: number[]
@@ -268,6 +275,11 @@ export interface BulkChangeStatusRequest extends ChangeStatusRequest {
 export interface BulkArchiveItemsRequest {
   item_ids: number[]
   archive_reason?: string
+}
+
+export interface BulkDeleteItemsRequest {
+  item_ids: number[]
+  delete_reason?: string
 }
 
 export interface ItemExportRequest {
@@ -343,6 +355,14 @@ export async function archiveItemApi(
   return response.data
 }
 
+export async function deleteItemApi(
+  itemId: number,
+  payload: DeleteItemRequest = {}
+): Promise<ItemDetail> {
+  const response = await apiClient.delete<ItemDetail>(`/items/${itemId}`, { data: payload })
+  return response.data
+}
+
 export async function moveItemApi(itemId: number, payload: MoveItemRequest): Promise<ItemDetail> {
   const response = await apiClient.post<ItemDetail>(`/items/${itemId}/move`, payload)
   return response.data
@@ -374,6 +394,13 @@ export async function bulkArchiveItemsApi(
   payload: BulkArchiveItemsRequest
 ): Promise<BulkItemOperationResponse> {
   const response = await apiClient.post<BulkItemOperationResponse>('/items/bulk/archive', payload)
+  return response.data
+}
+
+export async function bulkDeleteItemsApi(
+  payload: BulkDeleteItemsRequest
+): Promise<BulkItemOperationResponse> {
+  const response = await apiClient.post<BulkItemOperationResponse>('/items/bulk/delete', payload)
   return response.data
 }
 

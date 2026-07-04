@@ -60,6 +60,7 @@ class ResidenceResponse(ResponseModel):
     description: str
     address: str
     is_active: bool
+    is_deleted: bool
     created_at: datetime
     updated_at: datetime
     created_by_id: int | None = None
@@ -95,6 +96,7 @@ class LocationNodeResponse(LocationNodeUpdate):
 
     id: int
     residence_id: int
+    is_deleted: bool
     children: list[LocationNodeResponse] = Field(default_factory=list)
 
 
@@ -114,6 +116,7 @@ class FamilyMemberResponse(FamilyMemberUpdate):
 
     id: int
     user_id: int | None
+    is_deleted: bool
 
 
 class CategoryCreate(BaseModel):

@@ -306,7 +306,11 @@ def resolve_member(db: Session, raw_value: str, field: str, errors: list[ImportF
         return None
     members = db.scalars(
         select(FamilyMember)
-        .where(FamilyMember.is_active.is_(True), FamilyMember.name == value)
+        .where(
+            FamilyMember.is_active.is_(True),
+            FamilyMember.is_deleted.is_(False),
+            FamilyMember.name == value,
+        )
         .order_by(FamilyMember.id)
     ).all()
     if not members:
@@ -324,7 +328,11 @@ def resolve_residence(db: Session, raw_value: str, errors: list[ImportFieldMessa
         return None
     residence = db.scalar(
         select(Residence)
-        .where(Residence.is_active.is_(True), Residence.name == value)
+        .where(
+            Residence.is_active.is_(True),
+            Residence.is_deleted.is_(False),
+            Residence.name == value,
+        )
         .order_by(Residence.id)
         .limit(1)
     )
@@ -344,7 +352,10 @@ def resolve_location(
         return None
     stmt = (
         select(LocationNode)
-        .where(LocationNode.is_active.is_(True))
+        .where(
+            LocationNode.is_active.is_(True),
+            LocationNode.is_deleted.is_(False),
+        )
         .options(selectinload(LocationNode.parent), selectinload(LocationNode.residence))
         .order_by(LocationNode.id)
     )

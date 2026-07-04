@@ -128,6 +128,7 @@ class ItemSummaryResponse(ResponseModel):
     is_container: bool
     privacy_level: PrivacyLevel
     is_archived: bool
+    is_deleted: bool
     primary_image_url: str | None = None
     tags: list[TagResponse] = Field(default_factory=list)
     created_at: datetime
@@ -229,6 +230,8 @@ class ItemLoanResponse(ResponseModel):
 class ItemDetailResponse(ItemSummaryResponse):
     archive_reason: str
     archived_at: datetime | None = None
+    delete_reason: str
+    deleted_at: datetime | None = None
     created_by_id: int | None = None
     updated_by_id: int | None = None
     attribute_values: list[ItemAttributeValueResponse] = Field(default_factory=list)
@@ -281,6 +284,10 @@ class ArchiveItemRequest(RequestModel):
     archive_reason: str = Field(default="", max_length=255)
 
 
+class DeleteItemRequest(RequestModel):
+    delete_reason: str = Field(default="", max_length=255)
+
+
 class ItemIdBatchMixin(RequestModel):
     item_ids: list[int] = Field(min_length=1, max_length=200)
 
@@ -311,6 +318,10 @@ class BulkChangeStatusRequest(ItemIdBatchMixin):
 
 class BulkArchiveItemsRequest(ItemIdBatchMixin):
     archive_reason: str = Field(default="", max_length=255)
+
+
+class BulkDeleteItemsRequest(ItemIdBatchMixin):
+    delete_reason: str = Field(default="", max_length=255)
 
 
 class BulkItemOperationResponse(ResponseModel):

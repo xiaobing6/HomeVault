@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
-import { Download, Grid, List, Operation, Plus, Search, Upload } from '@element-plus/icons-vue'
+import { Delete, Download, Grid, List, Operation, Plus, Search, Upload } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   search?: string | null
@@ -22,6 +22,7 @@ const emit = defineEmits<{
   'bulk-move': []
   'bulk-status': []
   'bulk-archive': []
+  'bulk-delete': []
   'export-selected': []
   'export-filtered': []
   'import-items': []
@@ -113,6 +114,7 @@ function submitSearchNow() {
             <el-dropdown-item v-if="canEdit" @click="emit('bulk-move')">批量移动</el-dropdown-item>
             <el-dropdown-item v-if="canEdit" @click="emit('bulk-status')">批量改状态</el-dropdown-item>
             <el-dropdown-item v-if="canArchive" divided @click="emit('bulk-archive')">批量归档</el-dropdown-item>
+            <el-dropdown-item v-if="canArchive" :icon="Delete" @click="emit('bulk-delete')">批量删除</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>

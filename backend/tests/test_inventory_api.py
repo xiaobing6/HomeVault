@@ -190,6 +190,49 @@ def test_admin_can_create_list_detail_update_and_archive_item(client: TestClient
     assert archived_list.json()["items"][0]["is_archived"] is True
 
 
+def test_admin_can_delete_item_and_bulk_delete_items(client: TestClient, db_session: Session) -> None:
+    headers = login(client)
+    ids = inventory_ids(db_session)
+    first = create_item(client, headers, ids, name="Delete one")
+    second = create_item(client, headers, ids, name="Delete two")
+
+    single_delete = client.request(
+        "DELETE",
+        f"/api/items/{first['id']}",
+        headers=headers,
+        json={"delete_reason": "Duplicate"},
+    )
+    bulk_delete = client.post(
+        "/api/items/bulk/delete",
+        headers=headers,
+        json={"item_ids": [second["id"], second["id"]], "delete_reason": "Cleanup"},
+    )
+    list_response = client.get("/api/items", headers=headers, params={"include_archived": True})
+    detail_response = client.get(f"/api/items/{first['id']}", headers=headers)
+    export_response = client.post("/api/items/export.csv", headers=headers, json={})
+
+    assert single_delete.status_code == 200
+    assert single_delete.json()["is_deleted"] is True
+    assert single_delete.json()["delete_reason"] == "Duplicate"
+    assert bulk_delete.status_code == 200
+    assert bulk_delete.json()["updated_count"] == 1
+    assert list_response.json()["total"] == 0
+    assert detail_response.status_code == 404
+    assert "Delete one" not in export_response.text
+    assert "Delete two" not in export_response.text
+
+
+def test_editor_cannot_delete_items(client: TestClient, db_session: Session) -> None:
+    admin_headers = login(client)
+    editor_headers = login(client, "editor", "Editor123!")
+    ids = inventory_ids(db_session)
+    item = create_item(client, admin_headers, ids)
+
+    response = client.request("DELETE", f"/api/items/{item['id']}", headers=editor_headers, json={})
+
+    assert response.status_code == 403
+
+
 def test_editor_can_create_move_borrow_return_and_adjust_quantity(client: TestClient, db_session: Session) -> None:
     headers = login(client, "editor", "Editor123!")
     ids = inventory_ids(db_session)

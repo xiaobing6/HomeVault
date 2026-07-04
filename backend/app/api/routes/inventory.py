@@ -8,9 +8,11 @@ from app.schemas.inventory import (
     ArchiveItemRequest,
     BulkArchiveItemsRequest,
     BulkChangeStatusRequest,
+    BulkDeleteItemsRequest,
     BulkItemOperationResponse,
     BulkMoveItemsRequest,
     ChangeStatusRequest,
+    DeleteItemRequest,
     ImportConfirmRequest,
     ImportConfirmResponse,
     ImportPreviewResponse,
@@ -41,11 +43,13 @@ from app.services.inventory import (
     archive_item_image,
     bulk_archive_items,
     bulk_change_item_status,
+    bulk_delete_items,
     bulk_move_items,
     change_item_status,
     create_item,
     create_loan,
     create_tag,
+    delete_item,
     export_items_csv,
     get_item_attachment_file,
     get_item_detail,
@@ -121,6 +125,15 @@ def bulk_archive_inventory_items(
     user: User = Depends(require_permission(ARCHIVE_PERMISSION)),
 ) -> BulkItemOperationResponse:
     return bulk_archive_items(db, payload, actor_id=user.id)
+
+
+@router.post("/items/bulk/delete", response_model=BulkItemOperationResponse)
+def bulk_delete_inventory_items(
+    payload: BulkDeleteItemsRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(ARCHIVE_PERMISSION)),
+) -> BulkItemOperationResponse:
+    return bulk_delete_items(db, payload, actor_id=user.id)
 
 
 @router.post("/items/export.csv")
@@ -199,6 +212,16 @@ def archive_inventory_item(
     user: User = Depends(require_permission(ARCHIVE_PERMISSION)),
 ) -> ItemDetailResponse:
     return archive_item(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
+
+
+@router.delete("/items/{item_id}", response_model=ItemDetailResponse)
+def delete_inventory_item(
+    item_id: int,
+    payload: DeleteItemRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission(ARCHIVE_PERMISSION)),
+) -> ItemDetailResponse:
+    return delete_item(db, item_id, payload, actor_id=user.id, include_sensitive=can_view_sensitive(user))
 
 
 @router.post("/items/{item_id}/move", response_model=ItemDetailResponse)

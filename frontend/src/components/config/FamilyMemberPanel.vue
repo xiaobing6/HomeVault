@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ElMessage, type FormInstance } from 'element-plus'
-import { Edit, Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 
 import { getChineseErrorMessage } from '../../api/client'
 import type { FamilyMember } from '../../api/configuration'
@@ -17,6 +17,7 @@ const memberEditOpen = ref(false)
 const editingMember = ref<FamilyMember | null>(null)
 const saving = ref(false)
 const memberEditSaving = ref(false)
+const deletingMemberId = ref<number | null>(null)
 const form = reactive({
   name: '',
   relation: '',
@@ -120,6 +121,28 @@ async function updateFamilyMember() {
     memberEditSaving.value = false
   }
 }
+
+async function confirmDeleteMember(member: FamilyMember) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除家庭成员「${member.name}」吗？历史记录仍会保留姓名。`,
+      '删除家庭成员',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  deletingMemberId.value = member.id
+  try {
+    await configuration.deleteFamilyMember(member.id)
+    ElMessage.success('已删除成员')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    deletingMemberId.value = null
+  }
+}
 </script>
 
 <template>
@@ -158,10 +181,19 @@ async function updateFamilyMember() {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="92" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" :icon="Edit" @click="openMemberEdit(row)">
               编辑
+            </el-button>
+            <el-button
+              text
+              type="danger"
+              :icon="Delete"
+              :loading="deletingMemberId === row.id"
+              @click="confirmDeleteMember(row)"
+            >
+              删除
             </el-button>
           </template>
         </el-table-column>

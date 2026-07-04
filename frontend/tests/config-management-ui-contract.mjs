@@ -200,6 +200,12 @@ assert.match(
 )
 assert.match(residenceLocationPanel, /openResidenceCreate/, 'Residence toolbar should expose a new residence action')
 assert.match(residenceLocationPanel, /openLocationCreate/, 'Location toolbar should expose a new location action')
+assert.match(residenceLocationPanel, /Delete/, 'Residence/location panel should import a delete icon')
+assert.match(residenceLocationPanel, /ElMessageBox/, 'Residence/location deletes should confirm before running')
+assert.match(residenceLocationPanel, /deleteResidence/, 'Residence/location panel should call configuration.deleteResidence')
+assert.match(residenceLocationPanel, /deleteLocationNode/, 'Residence/location panel should call configuration.deleteLocationNode')
+assert.match(residenceLocationPanel, /confirmDeleteResidence/, 'Residence detail should expose a residence delete confirmation')
+assert.match(residenceLocationPanel, /confirmDeleteLocation/, 'Location detail should expose a location delete confirmation')
 for (const field of [
   'created_at: string',
   'updated_at: string',
@@ -302,6 +308,9 @@ assert.match(
   /<el-switch[\s\S]*v-model="memberEditForm\.is_active"/,
   'Family member edit dialog should expose active state with a switch'
 )
+assert.match(familyMemberPanel, /ElMessageBox/, 'Family member delete should confirm before running')
+assert.match(familyMemberPanel, /deleteFamilyMember/, 'Family member panel should call configuration.deleteFamilyMember')
+assert.match(familyMemberPanel, /confirmDeleteMember/, 'Family member table should expose delete confirmation')
 
 assert.match(
   categoryFieldPanel,

@@ -10,7 +10,7 @@ import type { ItemDetail, ItemLoan } from '../../api/inventory'
 import { useConfigurationStore } from '../../stores/configuration'
 import { useInventoryStore } from '../../stores/inventory'
 
-type ActionType = 'move' | 'status' | 'borrow' | 'return' | 'quantity' | 'archive'
+type ActionType = 'move' | 'status' | 'borrow' | 'return' | 'quantity' | 'archive' | 'delete'
 type QuantityMode = 'new' | 'delta'
 type PlacementType = 'location' | 'container'
 
@@ -81,6 +81,10 @@ const archiveForm = reactive({
   archive_reason: ''
 })
 
+const deleteForm = reactive({
+  delete_reason: ''
+})
+
 const dialogTitle = computed(() => {
   if (props.action === 'move') return '移动物品'
   if (props.action === 'status') return '修改状态'
@@ -88,6 +92,7 @@ const dialogTitle = computed(() => {
   if (props.action === 'return') return '归还物品'
   if (props.action === 'quantity') return '调整数量'
   if (props.action === 'archive') return '归档物品'
+  if (props.action === 'delete') return '删除物品'
   return '操作物品'
 })
 
@@ -258,6 +263,7 @@ function resetForms() {
   })
 
   archiveForm.archive_reason = ''
+  deleteForm.delete_reason = ''
 }
 
 function flattenLocationNodes(node: LocationNode, prefix: string): OptionItem[] {
@@ -397,6 +403,11 @@ async function submitAction() {
         note: quantityForm.note.trim()
       })
       ElMessage.success('数量已更新')
+    } else if (props.action === 'delete') {
+      detail = await inventory.deleteItem(props.item.id, {
+        delete_reason: deleteForm.delete_reason.trim()
+      })
+      ElMessage.success('已删除')
     } else {
       detail = await inventory.archiveItem(props.item.id, {
         archive_reason: archiveForm.archive_reason.trim()
@@ -608,6 +619,23 @@ async function submitAction() {
         <el-form-item label="归档原因">
           <el-input
             v-model="archiveForm.archive_reason"
+            type="textarea"
+            :rows="4"
+            maxlength="255"
+            show-word-limit
+          />
+        </el-form-item>
+      </template>
+
+      <template v-else-if="action === 'delete'">
+        <el-alert
+          title="删除后，物品将从普通列表、导出和详情入口隐藏。"
+          type="warning"
+          :closable="false"
+        />
+        <el-form-item label="删除原因">
+          <el-input
+            v-model="deleteForm.delete_reason"
             type="textarea"
             :rows="4"
             maxlength="255"

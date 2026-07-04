@@ -113,8 +113,11 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
         is_container=True,
         privacy_level="normal",
         is_archived=False,
+        is_deleted=False,
         archive_reason="",
         archived_at=None,
+        delete_reason="",
+        deleted_at=None,
         created_by_id=8,
         updated_by_id=9,
         created_at=now,
@@ -233,6 +236,8 @@ def test_item_detail_response_serializes_nested_inventory_payload() -> None:
     serialized = response.model_dump(mode="json")
 
     assert serialized["quantity"] == "2.50"
+    assert serialized["is_deleted"] is False
+    assert serialized["delete_reason"] == ""
     assert serialized["images"][0]["url"] == "/api/items/1/images/13/file"
     assert serialized["attachments"][0]["download_url"] == "/api/items/1/attachments/14/download"
     assert serialized["tags"][0]["name"] == "重要"
@@ -268,6 +273,7 @@ def test_item_list_response_serializes_paged_payload() -> None:
                 "is_container": False,
                 "privacy_level": "normal",
                 "is_archived": False,
+                "is_deleted": False,
                 "tags": [],
                 "created_at": now,
                 "updated_at": now,
@@ -284,3 +290,4 @@ def test_item_list_response_serializes_paged_payload() -> None:
     assert serialized["page"] == 2
     assert serialized["page_size"] == 1
     assert serialized["items"][0]["quantity"] == "1.00"
+    assert serialized["items"][0]["is_deleted"] is False

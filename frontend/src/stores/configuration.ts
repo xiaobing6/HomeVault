@@ -8,6 +8,9 @@ import {
   createItemStatusApi,
   createLocationNodeApi,
   createResidenceApi,
+  deleteFamilyMemberApi,
+  deleteLocationNodeApi,
+  deleteResidenceApi,
   fetchConfigBootstrapApi,
   updateAttributeDefinitionApi,
   updateAttributeOptionApi,
@@ -62,6 +65,11 @@ export const useConfigurationStore = defineStore('configuration', {
       await this.load()
       return residence
     },
+    async deleteResidence(residenceId: number) {
+      const residence = await deleteResidenceApi(residenceId)
+      await this.load()
+      return residence
+    },
     async uploadResidenceImage(residenceId: number, file: File) {
       const residence = await uploadResidenceImageApi(residenceId, file)
       await this.load()
@@ -75,6 +83,11 @@ export const useConfigurationStore = defineStore('configuration', {
       await updateLocationNodeApi(nodeId, payload)
       await this.load()
     },
+    async deleteLocationNode(nodeId: number) {
+      const location = await deleteLocationNodeApi(nodeId)
+      await this.load()
+      return location
+    },
     async createFamilyMember(payload: FamilyMemberCreate) {
       await createFamilyMemberApi(payload)
       await this.load()
@@ -82,6 +95,11 @@ export const useConfigurationStore = defineStore('configuration', {
     async updateFamilyMember(memberId: number, payload: FamilyMemberUpdate) {
       await updateFamilyMemberApi(memberId, payload)
       await this.load()
+    },
+    async deleteFamilyMember(memberId: number) {
+      const member = await deleteFamilyMemberApi(memberId)
+      await this.load()
+      return member
     },
     async createCategory(payload: CategoryCreate) {
       await createCategoryApi(payload)

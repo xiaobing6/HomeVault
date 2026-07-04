@@ -6,12 +6,14 @@ import {
   borrowItemApi,
   bulkArchiveItemsApi,
   bulkChangeItemStatusApi,
+  bulkDeleteItemsApi,
   bulkMoveItemsApi,
   changeItemStatusApi,
   confirmInventoryImportApi,
   createItemApi,
   deleteAttachmentApi,
   deleteImageApi,
+  deleteItemApi,
   downloadImportTemplateApi,
   exportItemsCsvApi,
   fetchItemDetailApi,
@@ -26,8 +28,10 @@ import {
   type ArchiveItemRequest,
   type BulkArchiveItemsRequest,
   type BulkChangeStatusRequest,
+  type BulkDeleteItemsRequest,
   type BulkMoveItemsRequest,
   type ChangeStatusRequest,
+  type DeleteItemRequest,
   type ImportConfirmRequest,
   type ItemCreateRequest,
   type ItemDetail,
@@ -169,6 +173,9 @@ export const useInventoryStore = defineStore('inventory', {
     async archiveItem(itemId: number, payload: ArchiveItemRequest = {}) {
       return await this.saveAndRefresh(() => archiveItemApi(itemId, payload))
     },
+    async deleteItem(itemId: number, payload: DeleteItemRequest = {}) {
+      return await this.saveAndRefresh(() => deleteItemApi(itemId, payload))
+    },
     async moveItem(itemId: number, payload: MoveItemRequest) {
       return await this.saveAndRefresh(() => moveItemApi(itemId, payload))
     },
@@ -183,6 +190,9 @@ export const useInventoryStore = defineStore('inventory', {
     },
     async bulkArchiveItems(payload: BulkArchiveItemsRequest) {
       return await this.saveAndRefresh(() => bulkArchiveItemsApi(payload))
+    },
+    async bulkDeleteItems(payload: BulkDeleteItemsRequest) {
+      return await this.saveAndRefresh(() => bulkDeleteItemsApi(payload))
     },
     async exportItemsCsv(payload: ItemExportRequest = {}) {
       return await exportItemsCsvApi(payload)

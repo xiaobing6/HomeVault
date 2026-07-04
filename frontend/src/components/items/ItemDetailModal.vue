@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import {
   Box,
+  Delete,
   Edit,
   FolderRemove,
   Location,
@@ -40,6 +41,7 @@ const emit = defineEmits<{
   return: [loan: ItemLoan]
   quantity: []
   archive: []
+  delete: []
   close: []
 }>()
 
@@ -219,6 +221,14 @@ function quantityText(row: ItemQuantityChange): string {
             @click="emit('archive')"
           >
             归档
+          </el-button>
+          <el-button
+            v-if="canArchive && !item.is_archived && !item.is_deleted"
+            type="danger"
+            :icon="Delete"
+            @click="emit('delete')"
+          >
+            删除
           </el-button>
         </div>
 

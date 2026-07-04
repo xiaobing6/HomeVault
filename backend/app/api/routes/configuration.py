@@ -42,6 +42,9 @@ from app.services.configuration import (
     create_location_node as create_location_node_record,
     create_residence as create_residence_record,
     build_residence_response,
+    delete_family_member as delete_family_member_record,
+    delete_location_node as delete_location_node_record,
+    delete_residence as delete_residence_record,
     get_residence_image_file,
     get_config_bootstrap,
     list_category_tree,
@@ -157,6 +160,15 @@ def update_residence(
     return update_residence_record(db, residence_id, payload, actor=user)
 
 
+@router.delete("/residences/{residence_id}", response_model=ResidenceResponse)
+def delete_residence(
+    residence_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("config:manage")),
+) -> ResidenceResponse:
+    return delete_residence_record(db, residence_id, actor=user)
+
+
 @router.post("/residences/{residence_id}/image", response_model=ResidenceResponse)
 async def upload_residence_image(
     residence_id: int,
@@ -201,6 +213,15 @@ def update_location_node(
     return update_location_node_record(db, node_id, payload, actor=user)
 
 
+@router.delete("/location-nodes/{node_id}", response_model=LocationNodeResponse)
+def delete_location_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("config:manage")),
+) -> LocationNodeResponse:
+    return delete_location_node_record(db, node_id, actor=user)
+
+
 @router.post("/family-members", response_model=FamilyMemberResponse, status_code=status.HTTP_201_CREATED)
 def create_family_member(
     payload: FamilyMemberCreate,
@@ -218,6 +239,15 @@ def update_family_member(
     user: User = Depends(require_permission("config:manage")),
 ) -> FamilyMemberResponse:
     return update_family_member_record(db, member_id, payload)
+
+
+@router.delete("/family-members/{member_id}", response_model=FamilyMemberResponse)
+def delete_family_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("config:manage")),
+) -> FamilyMemberResponse:
+    return delete_family_member_record(db, member_id, actor=user)
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)

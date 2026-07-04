@@ -28,6 +28,7 @@ export interface Residence {
   description: string
   address: string
   is_active: boolean
+  is_deleted: boolean
   created_at: string
   updated_at: string
   created_by_id: number | null
@@ -48,6 +49,7 @@ export interface LocationNode {
   sort_order: number
   note: string
   is_active: boolean
+  is_deleted: boolean
   children: LocationNode[]
 }
 
@@ -58,6 +60,7 @@ export interface FamilyMember {
   phone: string
   note: string
   is_active: boolean
+  is_deleted: boolean
   user_id: number | null
 }
 
@@ -273,6 +276,11 @@ export async function updateResidenceApi(
   return response.data
 }
 
+export async function deleteResidenceApi(residenceId: number): Promise<Residence> {
+  const response = await apiClient.delete<Residence>(`/config/residences/${residenceId}`)
+  return response.data
+}
+
 export async function uploadResidenceImageApi(residenceId: number, file: File): Promise<Residence> {
   const formData = new FormData()
   formData.append('file', file)
@@ -293,6 +301,11 @@ export async function updateLocationNodeApi(
   return response.data
 }
 
+export async function deleteLocationNodeApi(nodeId: number): Promise<LocationNode> {
+  const response = await apiClient.delete<LocationNode>(`/config/location-nodes/${nodeId}`)
+  return response.data
+}
+
 export async function createFamilyMemberApi(payload: FamilyMemberCreate): Promise<FamilyMember> {
   const response = await apiClient.post<FamilyMember>('/config/family-members', payload)
   return response.data
@@ -303,6 +316,11 @@ export async function updateFamilyMemberApi(
   payload: FamilyMemberUpdate
 ): Promise<FamilyMember> {
   const response = await apiClient.patch<FamilyMember>(`/config/family-members/${memberId}`, payload)
+  return response.data
+}
+
+export async function deleteFamilyMemberApi(memberId: number): Promise<FamilyMember> {
+  const response = await apiClient.delete<FamilyMember>(`/config/family-members/${memberId}`)
   return response.data
 }
 

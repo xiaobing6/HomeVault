@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { ElMessage, type FormInstance, type UploadUserFile } from 'element-plus'
-import { ArrowLeft, Calendar, Edit, House, Location, Memo, Picture, Plus, PriceTag, User } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, type FormInstance, type UploadUserFile } from 'element-plus'
+import { ArrowLeft, Calendar, Delete, Edit, House, Location, Memo, Picture, Plus, PriceTag, User } from '@element-plus/icons-vue'
 
 import { getChineseErrorMessage } from '../../api/client'
 import type { LocationNode, Residence } from '../../api/configuration'
@@ -38,6 +38,7 @@ const editingLocation = ref<LocationNode | null>(null)
 const residenceSaving = ref(false)
 const locationSaving = ref(false)
 const locationEditSaving = ref(false)
+const deletingResource = ref(false)
 const residenceImageFiles = ref<UploadUserFile[]>([])
 const residenceEditImageFiles = ref<UploadUserFile[]>([])
 const locationResidenceFilter = ref<number | '' | null | undefined>('')
@@ -386,6 +387,29 @@ async function updateResidence() {
   }
 }
 
+async function confirmDeleteResidence(residence: Residence) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除住宅「${residence.name}」吗？删除后普通列表将不再显示。`,
+      '删除住宅',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  deletingResource.value = true
+  try {
+    await configuration.deleteResidence(residence.id)
+    selectedResidence.value = null
+    ElMessage.success('已删除住宅')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    deletingResource.value = false
+  }
+}
+
 function openLocationEdit(location: LocationNode) {
   editingLocation.value = location
   Object.assign(locationEditForm, {
@@ -435,6 +459,29 @@ async function updateLocationNode() {
     ElMessage.error(getChineseErrorMessage(error))
   } finally {
     locationEditSaving.value = false
+  }
+}
+
+async function confirmDeleteLocation(location: LocationNode) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除位置「${location.name}」吗？子位置会一并删除。`,
+      '删除位置',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+
+  deletingResource.value = true
+  try {
+    await configuration.deleteLocationNode(location.id)
+    selectedLocation.value = null
+    ElMessage.success('已删除位置')
+  } catch (error) {
+    ElMessage.error(getChineseErrorMessage(error))
+  } finally {
+    deletingResource.value = false
   }
 }
 
@@ -492,6 +539,16 @@ async function saveLocation() {
           <el-icon v-else class="cover-placeholder"><House /></el-icon>
           <el-button class="detail-edit" :icon="Edit" round @click="openResidenceEdit(selectedResidenceDetail)">
             编辑
+          </el-button>
+          <el-button
+            class="detail-delete"
+            type="danger"
+            :icon="Delete"
+            round
+            :loading="deletingResource"
+            @click.stop="confirmDeleteResidence(selectedResidenceDetail)"
+          >
+            删除
           </el-button>
         </div>
 
@@ -565,6 +622,16 @@ async function saveLocation() {
           <el-icon class="cover-placeholder"><Location /></el-icon>
           <el-button class="detail-edit" :icon="Edit" round @click="openLocationEdit(selectedLocationDetail)">
             编辑
+          </el-button>
+          <el-button
+            class="detail-delete"
+            type="danger"
+            :icon="Delete"
+            round
+            :loading="deletingResource"
+            @click.stop="confirmDeleteLocation(selectedLocationDetail)"
+          >
+            删除
           </el-button>
         </div>
 
@@ -1148,6 +1215,13 @@ async function saveLocation() {
   right: 16px;
   color: #25342d;
   background: rgba(255, 255, 255, 0.9);
+  border: none;
+}
+
+.detail-delete {
+  position: absolute;
+  top: 16px;
+  right: 104px;
   border: none;
 }
 

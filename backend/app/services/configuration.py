@@ -21,7 +21,9 @@ from app.models.configuration import (
     ItemStatus,
     LocationNode,
     Residence,
+    utcnow,
 )
+from app.models.inventory import Item
 from app.schemas.configuration import (
     AttributeDefinitionCreate,
     AttributeDefinitionResponse,
@@ -112,6 +114,9 @@ CORE_DICTIONARY_GROUPS = [
 ACTIVE_RESIDENCE_NAME_EXISTS_MESSAGE = "\u542f\u7528\u4f4f\u5b85\u540d\u79f0\u5df2\u5b58\u5728"
 LOCATION_NODE_TYPE_GROUP = "location_node_types"
 LOCATION_NODE_TYPE_INVALID_MESSAGE = "\u4f4d\u7f6e\u7c7b\u578b\u4e0d\u5408\u6cd5"
+RESOURCE_NOT_FOUND_MESSAGE = "\u8d44\u6e90\u4e0d\u5b58\u5728"
+LOCATION_DELETE_BLOCKED_BY_ITEMS_MESSAGE = "\u5f53\u524d\u4f4d\u7f6e\u4e0b\u8fd8\u6709\u7269\u54c1\uff0c\u8bf7\u5148\u79fb\u52a8\u6216\u5220\u9664\u7269\u54c1"
+RESIDENCE_DELETE_BLOCKED_BY_ITEMS_MESSAGE = "\u5f53\u524d\u4f4f\u5b85\u4e0b\u8fd8\u6709\u7269\u54c1\uff0c\u8bf7\u5148\u79fb\u52a8\u6216\u5220\u9664\u7269\u54c1"
 
 
 def commit_or_bad_request(db: Session, message: str) -> None:
@@ -246,6 +251,7 @@ def list_residences(db: Session) -> list[Residence]:
     return list(
         db.scalars(
             select(Residence)
+            .where(Residence.is_deleted.is_(False))
             .options(
                 selectinload(Residence.location_nodes),
                 selectinload(Residence.created_by),
@@ -271,6 +277,7 @@ def build_residence_response(residence: Residence) -> ResidenceResponse:
         description=residence.description,
         address=residence.address,
         is_active=residence.is_active,
+        is_deleted=residence.is_deleted,
         created_at=residence.created_at,
         updated_at=residence.updated_at,
         created_by_id=residence.created_by_id,
@@ -284,14 +291,18 @@ def build_residence_response(residence: Residence) -> ResidenceResponse:
 
 def list_location_tree(db: Session) -> list[LocationNodeResponse]:
     nodes = db.scalars(
-        select(LocationNode).order_by(LocationNode.sort_order, LocationNode.id)
+        select(LocationNode)
+        .where(LocationNode.is_deleted.is_(False))
+        .order_by(LocationNode.sort_order, LocationNode.id)
     ).all()
     return build_location_tree(list(nodes))
 
 
 def list_family_members(db: Session) -> list[FamilyMemberResponse]:
     members = db.scalars(
-        select(FamilyMember).order_by(FamilyMember.id)
+        select(FamilyMember)
+        .where(FamilyMember.is_deleted.is_(False))
+        .order_by(FamilyMember.id)
     ).all()
     return [FamilyMemberResponse.model_validate(member) for member in members]
 
@@ -339,6 +350,7 @@ def build_location_tree(nodes: list[LocationNode]) -> list[LocationNodeResponse]
             sort_order=node.sort_order,
             note=node.note,
             is_active=node.is_active,
+            is_deleted=node.is_deleted,
             children=[build(child) for child in children_by_parent.get(node.id, [])],
         )
 
@@ -394,6 +406,56 @@ def build_category_tree(categories: list[Category]) -> list[CategoryResponse]:
     return [build(category) for category in children_by_parent.get(None, [])]
 
 
+def collect_location_subtree_ids(nodes: list[LocationNode], root_id: int) -> set[int]:
+    children_by_parent: dict[int | None, list[LocationNode]] = {}
+    for node in nodes:
+        children_by_parent.setdefault(node.parent_id, []).append(node)
+
+    collected: set[int] = set()
+    stack = [root_id]
+    while stack:
+        node_id = stack.pop()
+        if node_id in collected:
+            continue
+        collected.add(node_id)
+        stack.extend(child.id for child in children_by_parent.get(node_id, []))
+    return collected
+
+
+def active_inventory_effective_location_ids(db: Session) -> set[int]:
+    items = db.scalars(
+        select(Item).where(
+            Item.is_deleted.is_(False),
+            Item.is_archived.is_(False),
+        )
+    ).all()
+    items_by_id = {item.id: item for item in items}
+    location_ids: set[int] = set()
+
+    for item in items:
+        current: Item | None = item
+        visited: set[int] = set()
+        while current is not None and current.id not in visited:
+            visited.add(current.id)
+            if current.location_node_id is not None:
+                location_ids.add(current.location_node_id)
+                break
+            if current.container_item_id is None:
+                break
+            current = items_by_id.get(current.container_item_id)
+
+    return location_ids
+
+
+def assert_no_active_items_in_locations(
+    db: Session,
+    location_ids: set[int],
+    message: str,
+) -> None:
+    if location_ids and active_inventory_effective_location_ids(db).intersection(location_ids):
+        raise bad_request(message)
+
+
 def assert_location_parent_valid(
     db: Session,
     residence_id: int,
@@ -406,7 +468,7 @@ def assert_location_parent_valid(
         raise bad_request("位置上级节点不合法")
 
     parent = db.get(LocationNode, parent_id)
-    if parent is None or parent.residence_id != residence_id:
+    if parent is None or parent.is_deleted or parent.residence_id != residence_id:
         raise bad_request("位置上级节点不合法")
 
     visited: set[int] = set()
@@ -421,7 +483,7 @@ def assert_location_parent_valid(
         if next_parent.parent_id is None:
             return
         next_parent = db.get(LocationNode, next_parent.parent_id)
-        if next_parent is None or next_parent.residence_id != residence_id:
+        if next_parent is None or next_parent.is_deleted or next_parent.residence_id != residence_id:
             raise bad_request("位置上级节点不合法")
 
 
@@ -433,6 +495,7 @@ def assert_active_residence_name_available(
     statement = select(Residence).where(
         Residence.name == name,
         Residence.is_active.is_(True),
+        Residence.is_deleted.is_(False),
     )
     if current_id is not None:
         statement = statement.where(Residence.id != current_id)
@@ -482,10 +545,14 @@ def get_config_bootstrap(db: Session) -> ConfigBootstrapResponse:
 
         residences = list_residences(db)
         location_nodes = db.scalars(
-            select(LocationNode).order_by(LocationNode.sort_order, LocationNode.id)
+            select(LocationNode)
+            .where(LocationNode.is_deleted.is_(False))
+            .order_by(LocationNode.sort_order, LocationNode.id)
         ).all()
         family_members = db.scalars(
-            select(FamilyMember).order_by(FamilyMember.id)
+            select(FamilyMember)
+            .where(FamilyMember.is_deleted.is_(False))
+            .order_by(FamilyMember.id)
         ).all()
         categories = db.scalars(
             select(Category)
@@ -554,7 +621,7 @@ def create_location_node(
     actor: User | None = None,
 ) -> LocationNodeResponse:
     residence = db.get(Residence, payload.residence_id)
-    if residence is None:
+    if residence is None or residence.is_deleted:
         raise bad_request("住宅不存在")
     assert_location_parent_valid(db, payload.residence_id, payload.parent_id)
     node_type = require_active_dictionary_value(
@@ -716,7 +783,7 @@ def update_residence(
     actor: User | None = None,
 ) -> ResidenceResponse:
     residence = db.get(Residence, residence_id)
-    if residence is None:
+    if residence is None or residence.is_deleted:
         raise bad_request("Residence not found")
 
     if payload.is_active:
@@ -753,7 +820,7 @@ def stored_media_file(relative_path: str) -> Path:
 
 def get_residence_image_file(db: Session, residence_id: int) -> MediaFile:
     residence = db.get(Residence, residence_id)
-    if residence is None or not residence.image_path:
+    if residence is None or residence.is_deleted or not residence.image_path:
         raise not_found("\u56fe\u7247\u4e0d\u5b58\u5728")
     return MediaFile(
         path=stored_media_file(residence.image_path),
@@ -769,7 +836,7 @@ async def replace_residence_image(
     actor: User | None = None,
 ) -> ResidenceResponse:
     residence = db.get(Residence, residence_id)
-    if residence is None:
+    if residence is None or residence.is_deleted:
         raise not_found("\u4f4f\u5b85\u4e0d\u5b58\u5728")
 
     content_type = upload.content_type or ""
@@ -824,7 +891,7 @@ def update_location_node(
     actor: User | None = None,
 ) -> LocationNodeResponse:
     node = db.get(LocationNode, node_id)
-    if node is None:
+    if node is None or node.is_deleted:
         raise bad_request("Location node not found")
 
     assert_location_parent_valid(db, node.residence_id, payload.parent_id, current_id=node_id)
@@ -882,7 +949,7 @@ def update_family_member(
     payload: FamilyMemberUpdate,
 ) -> FamilyMemberResponse:
     member = db.get(FamilyMember, member_id)
-    if member is None:
+    if member is None or member.is_deleted:
         raise bad_request("Family member not found")
 
     member.name = payload.name
@@ -893,6 +960,117 @@ def update_family_member(
     db.commit()
     db.refresh(member)
     return FamilyMemberResponse.model_validate(member)
+
+
+def delete_family_member(
+    db: Session,
+    member_id: int,
+    actor: User | None = None,
+) -> FamilyMemberResponse:
+    member = db.get(FamilyMember, member_id)
+    if member is None or member.is_deleted:
+        raise not_found(RESOURCE_NOT_FOUND_MESSAGE)
+
+    member.is_deleted = True
+    member.deleted_at = utcnow()
+    member.deleted_by_id = actor.id if actor is not None else None
+    record_audit_log(
+        db,
+        action="config.family_member.delete",
+        resource_type="family_member",
+        actor=actor,
+        resource_id=member.id,
+        resource_label=member.name,
+    )
+    commit_or_bad_request(db, RESOURCE_NOT_FOUND_MESSAGE)
+    db.refresh(member)
+    return FamilyMemberResponse.model_validate(member)
+
+
+def delete_location_node(
+    db: Session,
+    node_id: int,
+    actor: User | None = None,
+) -> LocationNodeResponse:
+    node = db.get(LocationNode, node_id)
+    if node is None or node.is_deleted:
+        raise not_found(RESOURCE_NOT_FOUND_MESSAGE)
+
+    nodes = db.scalars(
+        select(LocationNode)
+        .where(
+            LocationNode.residence_id == node.residence_id,
+            LocationNode.is_deleted.is_(False),
+        )
+        .order_by(LocationNode.sort_order, LocationNode.id)
+    ).all()
+    subtree_ids = collect_location_subtree_ids(list(nodes), node.id)
+    assert_no_active_items_in_locations(db, subtree_ids, LOCATION_DELETE_BLOCKED_BY_ITEMS_MESSAGE)
+
+    deleted_at = utcnow()
+    actor_id = actor.id if actor is not None else None
+    for location in nodes:
+        if location.id in subtree_ids:
+            location.is_deleted = True
+            location.deleted_at = deleted_at
+            location.deleted_by_id = actor_id
+
+    record_audit_log(
+        db,
+        action="config.location.delete",
+        resource_type="location_node",
+        actor=actor,
+        resource_id=node.id,
+        resource_label=node.name,
+        metadata={"residence_id": node.residence_id, "deleted_count": len(subtree_ids)},
+    )
+    commit_or_bad_request(db, RESOURCE_NOT_FOUND_MESSAGE)
+    db.refresh(node)
+    return LocationNodeResponse.model_validate(node)
+
+
+def delete_residence(
+    db: Session,
+    residence_id: int,
+    actor: User | None = None,
+) -> ResidenceResponse:
+    residence = db.get(Residence, residence_id)
+    if residence is None or residence.is_deleted:
+        raise not_found(RESOURCE_NOT_FOUND_MESSAGE)
+
+    nodes = db.scalars(
+        select(LocationNode)
+        .where(
+            LocationNode.residence_id == residence.id,
+            LocationNode.is_deleted.is_(False),
+        )
+        .order_by(LocationNode.sort_order, LocationNode.id)
+    ).all()
+    location_ids = {node.id for node in nodes}
+    assert_no_active_items_in_locations(db, location_ids, RESIDENCE_DELETE_BLOCKED_BY_ITEMS_MESSAGE)
+
+    deleted_at = utcnow()
+    actor_id = actor.id if actor is not None else None
+    residence.is_deleted = True
+    residence.deleted_at = deleted_at
+    residence.deleted_by_id = actor_id
+    for node in nodes:
+        node.is_deleted = True
+        node.deleted_at = deleted_at
+        node.deleted_by_id = actor_id
+
+    record_audit_log(
+        db,
+        action="config.residence.delete",
+        resource_type="residence",
+        actor=actor,
+        resource_id=residence.id,
+        resource_label=residence.name,
+        metadata={"deleted_location_count": len(nodes)},
+    )
+    commit_or_bad_request(db, RESOURCE_NOT_FOUND_MESSAGE)
+    db.refresh(residence)
+    return build_residence_response(residence)
 
 
 def update_category(db: Session, category_id: int, payload: CategoryUpdate) -> CategoryResponse:

@@ -748,3 +748,146 @@ def test_location_update_allows_unchanged_disabled_node_type(
     )
     assert unchanged.status_code == 200
     assert unchanged.json()["node_type"] == "room"
+
+
+def test_configuration_payloads_include_soft_delete_flags(client: TestClient) -> None:
+    headers = login(client)
+
+    residence = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Soft Delete Home", "description": "", "address": ""},
+    )
+    assert residence.status_code == 201
+    location = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence.json()["id"], "name": "Soft Delete Shelf", "node_type": "shelf"},
+    )
+    member = client.post(
+        "/api/config/family-members",
+        headers=headers,
+        json={"name": "Soft Delete Member", "relation": "Owner", "phone": "", "note": ""},
+    )
+
+    assert residence.json()["is_deleted"] is False
+    assert location.status_code == 201
+    assert location.json()["is_deleted"] is False
+    assert member.status_code == 201
+    assert member.json()["is_deleted"] is False
+
+
+def test_config_delete_endpoints_hide_records_and_write_audit_logs(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    headers = login(client)
+    residence = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Delete Home", "description": "", "address": ""},
+    )
+    assert residence.status_code == 201
+    residence_id = residence.json()["id"]
+    parent = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence_id, "name": "Parent Shelf", "node_type": "shelf"},
+    )
+    child = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence_id, "parent_id": parent.json()["id"], "name": "Child Box", "node_type": "box"},
+    )
+    member = client.post(
+        "/api/config/family-members",
+        headers=headers,
+        json={"name": "Deleted Member", "relation": "Owner", "phone": "", "note": ""},
+    )
+    assert parent.status_code == 201
+    assert child.status_code == 201
+    assert member.status_code == 201
+
+    member_delete = client.delete(f"/api/config/family-members/{member.json()['id']}", headers=headers)
+    location_delete = client.delete(f"/api/config/location-nodes/{parent.json()['id']}", headers=headers)
+    residence_delete = client.delete(f"/api/config/residences/{residence_id}", headers=headers)
+    bootstrap = client.get("/api/config/bootstrap", headers=headers)
+
+    assert member_delete.status_code == 200
+    assert member_delete.json()["is_deleted"] is True
+    assert location_delete.status_code == 200
+    assert location_delete.json()["is_deleted"] is True
+    assert residence_delete.status_code == 200
+    assert residence_delete.json()["is_deleted"] is True
+    assert bootstrap.status_code == 200
+    assert all(item["id"] != residence_id for item in bootstrap.json()["residences"])
+    assert all(item["id"] != member.json()["id"] for item in bootstrap.json()["family_members"])
+    assert all(item["id"] != parent.json()["id"] for item in bootstrap.json()["location_tree"])
+
+    audit_actions = {
+        log.action
+        for log in db_session.scalars(select(AuditLog).where(AuditLog.action.like("config.%.delete"))).all()
+    }
+    assert audit_actions == {
+        "config.family_member.delete",
+        "config.location.delete",
+        "config.residence.delete",
+    }
+
+
+def test_config_delete_blocks_active_inventory_references(client: TestClient) -> None:
+    headers = login(client)
+    residence = client.post(
+        "/api/config/residences",
+        headers=headers,
+        json={"name": "Blocked Home", "description": "", "address": ""},
+    )
+    assert residence.status_code == 201
+    location = client.post(
+        "/api/config/location-nodes",
+        headers=headers,
+        json={"residence_id": residence.json()["id"], "name": "Blocked Shelf", "node_type": "shelf"},
+    )
+    assert location.status_code == 201
+    member = client.post(
+        "/api/config/family-members",
+        headers=headers,
+        json={"name": "Blocked Member", "relation": "Owner", "phone": "", "note": ""},
+    )
+    assert member.status_code == 201
+    category = client.post(
+        "/api/config/categories",
+        headers=headers,
+        json={"code": "blocked_documents", "name": "Blocked Documents", "icon": "document", "sort_order": 10},
+    )
+    assert category.status_code == 201
+    bootstrap = client.get("/api/config/bootstrap", headers=headers).json()
+    status_id = next(status["id"] for status in bootstrap["item_statuses"] if status["code"] == "in_stock")
+
+    item = client.post(
+        "/api/items",
+        headers=headers,
+        json={
+            "name": "Referenced Item",
+            "category_id": category.json()["id"],
+            "status_id": status_id,
+            "quantity": "1",
+            "unit": "pcs",
+            "owner_member_id": member.json()["id"],
+            "keeper_member_id": member.json()["id"],
+            "location_node_id": location.json()["id"],
+            "is_container": False,
+            "privacy_level": "normal",
+            "attribute_values": [],
+            "tags": [],
+        },
+    )
+    assert item.status_code == 201
+
+    location_delete = client.delete(f"/api/config/location-nodes/{location.json()['id']}", headers=headers)
+    residence_delete = client.delete(f"/api/config/residences/{residence.json()['id']}", headers=headers)
+
+    assert location_delete.status_code == 400
+    assert "物品" in location_delete.json()["message"]
+    assert residence_delete.status_code == 400
+    assert "物品" in residence_delete.json()["message"]

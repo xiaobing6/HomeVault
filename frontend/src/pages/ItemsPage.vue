@@ -19,8 +19,8 @@ import { useAuthStore } from '../stores/auth'
 import { useConfigurationStore } from '../stores/configuration'
 import { useInventoryStore } from '../stores/inventory'
 
-type ItemActionType = 'move' | 'status' | 'borrow' | 'return' | 'quantity' | 'archive'
-type BulkActionType = 'move' | 'status' | 'archive'
+type ItemActionType = 'move' | 'status' | 'borrow' | 'return' | 'quantity' | 'archive' | 'delete'
+type BulkActionType = 'move' | 'status' | 'archive' | 'delete'
 
 const auth = useAuthStore()
 const configuration = useConfigurationStore()
@@ -147,6 +147,8 @@ function openEditDrawer() {
 
 function openActionDialog(action: ItemActionType, loan?: ItemLoan) {
   if (!selectedItem.value) return
+  if ((action === 'archive' || action === 'delete') && !canArchive.value) return
+  if (!['archive', 'delete'].includes(action) && !canEdit.value) return
   currentAction.value = action
   returnLoan.value = loan ?? null
   actionOpen.value = true
@@ -162,7 +164,7 @@ function openBulkAction(action: BulkActionType) {
     return
   }
   if ((action === 'move' || action === 'status') && !canEdit.value) return
-  if (action === 'archive' && !canArchive.value) return
+  if ((action === 'archive' || action === 'delete') && !canArchive.value) return
   currentBulkAction.value = action
   bulkActionOpen.value = true
 }
@@ -184,6 +186,20 @@ async function handleFormSaved(detail: ItemDetail) {
 
 async function handleActionSuccess(detail: ItemDetail) {
   await refreshListAndDetail(detail.id)
+}
+
+async function handleDeleteSuccess(_detail: ItemDetail) {
+  detailOpen.value = false
+  inventory.closeDetail()
+  await inventory.loadItems()
+}
+
+async function handleDialogSuccess(detail: ItemDetail) {
+  if (currentAction.value === 'delete') {
+    await handleDeleteSuccess(detail)
+    return
+  }
+  await handleActionSuccess(detail)
 }
 
 function handleBulkSuccess(_response: BulkItemOperationResponse) {
@@ -289,6 +305,7 @@ function closeDetail() {
           @bulk-move="openBulkAction('move')"
           @bulk-status="openBulkAction('status')"
           @bulk-archive="openBulkAction('archive')"
+          @bulk-delete="openBulkAction('delete')"
           @export-filtered="exportFilteredItems"
           @export-selected="exportSelectedItems"
           @import-items="importDialogOpen = true"
@@ -341,6 +358,7 @@ function closeDetail() {
       @return="(loan) => openActionDialog('return', loan)"
       @quantity="openActionDialog('quantity')"
       @archive="openActionDialog('archive')"
+      @delete="openActionDialog('delete')"
       @close="closeDetail"
     />
 
@@ -349,7 +367,7 @@ function closeDetail() {
       :action="currentAction"
       :item="selectedItem"
       :return-loan="returnLoan"
-      @success="handleActionSuccess"
+      @success="handleDialogSuccess"
     />
 
     <BulkActionDialogs

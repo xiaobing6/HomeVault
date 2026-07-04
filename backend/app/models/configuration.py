@@ -46,8 +46,8 @@ class Residence(Base):
             "uq_residences_active_name",
             "name",
             unique=True,
-            sqlite_where=text("is_active = 1"),
-            postgresql_where=text("is_active = true"),
+            sqlite_where=text("is_active = 1 AND is_deleted = 0"),
+            postgresql_where=text("is_active = true AND is_deleted = false"),
         ),
     )
 
@@ -63,6 +63,9 @@ class Residence(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -74,6 +77,7 @@ class Residence(Base):
     home_space: Mapped[HomeSpace] = relationship(back_populates="residences", lazy="selectin")
     created_by: Mapped[object | None] = relationship("User", foreign_keys=[created_by_id], lazy="selectin")
     updated_by: Mapped[object | None] = relationship("User", foreign_keys=[updated_by_id], lazy="selectin")
+    deleted_by: Mapped[object | None] = relationship("User", foreign_keys=[deleted_by_id], lazy="selectin")
     location_nodes: Mapped[list[LocationNode]] = relationship(
         back_populates="residence",
         cascade="all, delete-orphan",
@@ -94,8 +98,12 @@ class LocationNode(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     note: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     residence: Mapped[Residence] = relationship(back_populates="location_nodes", lazy="selectin")
+    deleted_by: Mapped[object | None] = relationship("User", foreign_keys=[deleted_by_id], lazy="selectin")
     parent: Mapped[LocationNode | None] = relationship(
         back_populates="children",
         remote_side=[id],
@@ -119,8 +127,12 @@ class FamilyMember(Base):
     phone: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     note: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     home_space: Mapped[HomeSpace] = relationship(back_populates="family_members", lazy="selectin")
+    deleted_by: Mapped[object | None] = relationship("User", foreign_keys=[deleted_by_id], lazy="selectin")
 
 
 class Category(Base):
